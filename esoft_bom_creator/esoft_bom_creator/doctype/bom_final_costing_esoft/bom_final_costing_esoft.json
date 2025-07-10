@@ -6,91 +6,102 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "bfc_description",
-  "bfc_wt",
-  "bfc_wastage_perc",
-  "bfc_wastage_wt",
-  "bfc_twt",
-  "bfc_area",
-  "bfc_mat_rate",
-  "bfc_charge_rate",
-  "bfc_total_rate",
-  "bfc_final_cost"
+  "description",
+  "weight",
+  "wastage_percentage",
+  "wastage_weight",
+  "total_weight",
+  "total_area",
+  "material_rate",
+  "charges_rate",
+  "total_rate",
+  "total_cost"
  ],
  "fields": [
   {
-   "fieldname": "bfc_description",
+   "fieldname": "description",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Description",
    "read_only": 1
   },
   {
-   "fieldname": "bfc_wt",
+   "fieldname": "weight",
    "fieldtype": "Float",
-   "label": "Wt",
-   "precision": "2",
+   "in_list_view": 1,
+   "label": "Weight",
+   "precision": "3",
    "read_only": 1
   },
   {
-   "fieldname": "bfc_wastage_perc",
-   "fieldtype": "Float",
+   "fieldname": "wastage_percentage",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
    "label": "Wastage Percentage",
-   "precision": "2"
+   "precision": "3"
   },
   {
-   "fieldname": "bfc_wastage_wt",
+   "fieldname": "wastage_weight",
    "fieldtype": "Float",
-   "label": "Wastage Wt",
+   "in_list_view": 1,
+   "label": "Wastage Weight",
    "precision": "2",
    "read_only": 1
   },
   {
-   "fieldname": "bfc_twt",
+   "fieldname": "total_weight",
    "fieldtype": "Float",
-   "label": "Total Wt",
-   "precision": "2",
+   "in_list_view": 1,
+   "label": "Total Weight",
+   "precision": "3",
    "read_only": 1
   },
   {
-   "fieldname": "bfc_area",
-   "fieldtype": "Data",
+   "fieldname": "total_area",
+   "fieldtype": "Float",
+   "in_list_view": 1,
    "label": "Total Area",
+   "precision": "3",
    "read_only": 1
   },
   {
-   "fieldname": "bfc_mat_rate",
+   "fieldname": "material_rate",
    "fieldtype": "Float",
+   "in_list_view": 1,
    "label": "Material Rate",
-   "precision": "2"
+   "precision": "3"
   },
   {
-   "fieldname": "bfc_charge_rate",
+   "fieldname": "charges_rate",
    "fieldtype": "Float",
+   "in_list_view": 1,
    "label": "Charges Rate",
-   "precision": "2"
+   "precision": "3"
   },
   {
-   "fieldname": "bfc_total_rate",
+   "fieldname": "total_rate",
    "fieldtype": "Float",
+   "in_list_view": 1,
    "label": "Total Rate",
-   "precision": "2",
+   "precision": "3",
    "read_only": 1
   },
   {
-   "fieldname": "bfc_final_cost",
+   "fieldname": "total_cost",
    "fieldtype": "Float",
+   "in_list_view": 1,
    "label": "Final Cost",
-   "precision": "2"
+   "precision": "3"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2025-07-07 15:58:14.137823",
+ "modified": "2025-07-10 17:48:55.226031",
  "modified_by": "Administrator",
  "module": "Esoft Bom Creator",
- "name": "BOM Final Costing",
+ "name": "BOM Final Costing Esoft",
  "owner": "Administrator",
  "permissions": [],
  "row_format": "Dynamic",

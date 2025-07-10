@@ -5,5 +5,5 @@
 from frappe.model.document import Document
 
 
-class BOMFinalCosting(Document):
+class BOMFinalCostingEsoft(Document):
 	pass
