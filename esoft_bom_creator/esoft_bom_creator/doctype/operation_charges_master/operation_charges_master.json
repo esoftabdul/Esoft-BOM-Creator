@@ -1,6 +1,6 @@
 {
  "actions": [],
- "allow_rename": 1,
+ "autoname": "autoincrement",
  "creation": "2025-06-23 16:39:17.966366",
  "doctype": "DocType",
  "engine": "InnoDB",
@@ -8,7 +8,8 @@
   "section_break_eltn",
   "amended_from",
   "cm_charges_name",
-  "cm_type"
+  "cm_type",
+  "is_valid_in_costing_summary"
  ],
  "fields": [
   {
@@ -35,16 +36,23 @@
    "fieldtype": "Select",
    "label": "Type",
    "options": "\nWeight\nArea"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_valid_in_costing_summary",
+   "fieldtype": "Check",
+   "label": "Is Valid in Costing Summary"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-07-07 16:01:05.018566",
+ "modified": "2025-07-09 16:13:14.244158",
  "modified_by": "Administrator",
  "module": "Esoft Bom Creator",
  "name": "Operation Charges Master",
+ "naming_rule": "Autoincrement",
  "owner": "Administrator",
  "permissions": [
   {
