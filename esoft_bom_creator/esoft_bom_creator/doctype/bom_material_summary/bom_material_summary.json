@@ -10,8 +10,7 @@
   "rl",
   "rt",
   "bw",
-  "ar",
-  "valid_for_operation"
+  "ar"
  ],
  "fields": [
   {
@@ -34,27 +33,20 @@
    "fieldname": "bw",
    "fieldtype": "Float",
    "label": "Weight",
-   "precision": "2"
+   "precision": "3"
   },
   {
    "fieldname": "ar",
    "fieldtype": "Float",
    "label": "Area",
-   "precision": "2"
-  },
-  {
-   "default": "1",
-   "fieldname": "valid_for_operation",
-   "fieldtype": "Check",
-   "hidden": 1,
-   "label": "Valid For Operation"
+   "precision": "3"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2025-07-07 16:00:15.407735",
+ "modified": "2025-07-11 17:44:49.506975",
  "modified_by": "Administrator",
  "module": "Esoft Bom Creator",
  "name": "BOM Material Summary",

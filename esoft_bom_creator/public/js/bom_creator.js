@@ -41,17 +41,64 @@ frappe.ui.form.on("BOM Creator Item", {
 	},
 });
 
+frappe.ui.form.on("BOM Material Summary", {
+	bw: async function (frm, cdt, cdn) {
+		const summary_item = locals[cdt][cdn];
+		await update_costing_summary_row(frm, summary_item);
+		update_costing_operation_rows(frm);
+	},
+	ar: async function (frm, cdt, cdn) {
+		const summary_item = locals[cdt][cdn];
+		await update_costing_summary_row(frm, summary_item);
+		update_costing_operation_rows(frm);
+	},
+});
+
 frappe.ui.form.on("BOM Hardware Costing", {
 	hs_unit_price: function (frm, cdt, cdn) {
 		hardware_price_change(frm, cdt, cdn);
 	},
+	hs_total_cost: function (frm) {
+		update_costing_hardware_row(frm);
+	},
+});
+
+frappe.ui.form.on("BOM Powder Coating Summary", {
+	pcts_total_area: async function (frm, cdt, cdn) {
+		const powder_item = locals[cdt][cdn];
+		await update_costing_powder_row(frm, powder_item);
+	},
+});
+
+frappe.ui.form.on("BOM Final Costing Esoft", {
+	weight: function (frm, cdt, cdn) {
+		set_calculated_percent_value(frm, cdt, cdn);
+	},
+	wastage_percentage: function (frm, cdt, cdn) {
+		set_calculated_percent_value(frm, cdt, cdn);
+	},
+	material_rate: function (frm, cdt, cdn) {
+		set_costing_table_total_rate(frm, cdt, cdn);
+	},
+	charges_rate: function (frm, cdt, cdn) {
+		set_costing_table_total_rate(frm, cdt, cdn);
+	},
+	total_weight: function (frm, cdt, cdn) {
+		set_total_cost(frm, cdt, cdn);
+	},
+	total_rate: function (frm, cdt, cdn) {
+		set_total_cost(frm, cdt, cdn);
+	},
+	total_cost: function (frm, cdt, cdn) {
+		calculate_and_set_total_cost(frm);
+	},
 });
 
 function set_defaults(frm) {
-	// update_full_summary(frm)   Only use if want to populate summary table for old docs
 	set_summary_cache(frm);
 	set_operation_list(frm);
 	set_groups_cache(frm);
+	// update_full_summary(frm)  // Only use if want to populate summary table for old docs
 }
 
 async function fetch_hardware_item_groups() {
@@ -160,6 +207,7 @@ async function set_summary_cache(frm) {
 async function set_groups_cache(frm) {
 	frm.hw_groups = await fetch_hardware_item_groups();
 	frm.powder_groups = await get_powder_groups();
+	frm.operation_master_list = await get_operation_master(frm);
 }
 
 async function handle_item_change(frm, cdt, cdn) {
@@ -345,8 +393,15 @@ async function map_summary_tables(frm) {
 	rebuild_hardware_summary(frm, hardware_agg, cust_price, today);
 	rebuild_powder_summary(frm, powder_agg);
 
+	populate_costing_summary(frm);
+
+	refresh_summary_tables(frm);
+}
+
+function refresh_summary_tables(frm) {
 	frm.refresh_field("custom_hardware_summary");
 	frm.refresh_field("custom_powder_coating_summary");
+	frm.refresh_field("custom_costing_summary");
 }
 
 function update_summary_for_row(frm, cdt, cdn) {
@@ -366,8 +421,7 @@ function update_summary_for_row(frm, cdt, cdn) {
 		recalc_powder_totals(frm);
 	}
 
-	frm.refresh_field("custom_hardware_summary");
-	frm.refresh_field("custom_powder_coating_summary");
+	refresh_summary_tables(frm);
 }
 
 function aggregate_items(items = [], hw_groups, powder_groups) {
@@ -385,9 +439,9 @@ function aggregate_items(items = [], hw_groups, powder_groups) {
 			};
 			hardware_agg[r.item_code].qty += qty;
 		} else if (powder_groups.includes(r.item_group)) {
-			const key = `${r.item_group}|${r.custom_range}`;
+			const key = r.custom_range;
 			powder_agg[key] = powder_agg[key] || {
-				item_group: r.item_group,
+				item_group: "Powder Coating",
 				range: r.custom_range,
 				area: 0,
 			};
@@ -439,7 +493,7 @@ function rebuild_powder_summary(frm, powder_agg) {
 
 	Object.values(powder_agg).forEach((o) => {
 		const row = frm.add_child("custom_powder_coating_summary");
-		row.item_group = o.item_group;
+		row.item_group = "Powder Coating";
 		row.range = o.range;
 		row.area = o.area;
 
@@ -467,9 +521,7 @@ function adjust_hardware_row(frm, item_row, d_qty) {
 
 function adjust_powder_row(frm, item_row, d_area) {
 	const summary = frm.doc.custom_powder_coating_summary || [];
-	const idx = summary.findIndex(
-		(r) => r.item_group === item_row.item_group && r.range === item_row.custom_range
-	);
+	const idx = summary.findIndex((r) => r.range === item_row.custom_range);
 	if (idx === -1) return;
 
 	const srow = summary[idx];
@@ -505,6 +557,343 @@ function recalc_powder_totals(frm) {
 	const total_row = frm.doc.custom_powder_coating_summary.slice(-1)[0];
 	if (total_row) {
 		frappe.model.set_value(total_row.doctype, total_row.name, "area", t_area);
+	}
+}
+
+async function populate_costing_summary(frm) {
+	frm.clear_table("custom_costing_summary");
+	const { hardware_and_bo_summary: summary = [] } = await fetch_customer_pricing(frm);
+	const today = frappe.datetime.str_to_obj(frappe.datetime.get_today());
+	let total_weight = 0;
+	let total_area = 0;
+	let sub_total = 0;
+
+	// Summary Table
+	for (const item of frm.doc.custom_summary || []) {
+		const row = frm.add_child("custom_costing_summary");
+		row.description = `${item.ig} (${item.rl} & ${item.rt})`;
+		row.weight = item.bw || 0;
+		row.wastage_percentage = 10;
+		row.wastage_weight = calculate_percent_value(row.wastage_percentage, row.weight);
+		row.total_weight = calculate_total_wastage(row.weight, row.wastage_weight);
+		row.total_area = null; // Raw material based on weight, so area is null
+		row.charges_rate = get_charges_rate(summary, "Raw Material", today, item.ig, item.rl);
+		row.material_rate = get_material_rate(summary, today, item.rl, item.rt);
+		row.total_rate = calculate_total_rate(row.charges_rate, row.material_rate);
+		row.total_cost = !row.total_area
+			? calculate_total_cost(row.total_weight, row.total_rate)
+			: 0;
+
+		total_weight += item.bw || 0;
+		total_area += item.ar || 0;
+		sub_total += row.total_cost || 0;
+	}
+
+	// Powder Coating
+	for (const item of frm.doc.custom_powder_coating_summary || []) {
+		if (item.item_group === "Total") continue;
+		const powder_row = frm.add_child("custom_costing_summary");
+		powder_row.description = `Powder Coating (${item.range})`;
+		powder_row.weight = null; // Powder coating based on area, so weight is null
+		powder_row.total_area = item.area || 0;
+		powder_row.charges_rate = get_charges_rate(
+			summary,
+			"Operation Charges",
+			today,
+			item.item_group,
+			item.range
+		);
+		powder_row.total_rate = calculate_total_rate(
+			powder_row.charges_rate,
+			powder_row.material_rate || 0
+		);
+		powder_row.total_cost = powder_row.total_area
+			? calculate_total_cost(powder_row.total_area, powder_row.total_rate)
+			: 0;
+
+		sub_total += powder_row.total_cost || 0;
+	}
+
+	// Hardware Totals
+	const hardware_row = frm.add_child("custom_costing_summary");
+	hardware_row.description = "Hardware Cost";
+	const hardware_total = frm.doc.custom_hardware_summary?.findLast(
+		(element) => element.hs_item_name === "Total"
+	);
+	hardware_row.total_cost = hardware_total ? hardware_total.hs_total_cost || 0 : 0;
+	sub_total += hardware_row.total_cost || 0;
+
+	// HC Row
+	const hc_row = frm.add_child("custom_costing_summary");
+	hc_row.description = "H.C";
+
+	// Operation List
+	const operations_master = frm.operation_master_list || get_operation_master();
+	for (const operation of operations_master || []) {
+		const operation_row = frm.add_child("custom_costing_summary");
+		operation_row.description = `${operation.cm_charges_name}`;
+		operation_row.weight = operation.cm_type === "Weight" ? total_weight : 0;
+		operation_row.total_weight = operation_row.weight;
+		operation_row.total_area = operation.cm_type === "Area" ? total_area : 0;
+		// Add total_cost calculation if needed for operations
+	}
+
+	// Total Rows
+	const sub_total_row = frm.add_child("custom_costing_summary");
+	sub_total_row.description = "Sub Total";
+	sub_total_row.total_cost = sub_total || 0;
+
+	const development_row = frm.add_child("custom_costing_summary");
+	development_row.description = "Development Cost";
+
+	const final_row = frm.add_child("custom_costing_summary");
+	final_row.description = "Final Cost";
+	final_row.total_cost = sub_total || 0; // Adjust if development cost is added
+
+	frm.doc.raw_material_cost = sub_total || 0;
+	frm.refresh_field("raw_material_cost");
+	frm.refresh_field("custom_costing_summary");
+}
+
+async function update_costing_summary_row(frm, summary_item) {
+	const description = `${summary_item.ig} (${summary_item.rl} & ${summary_item.rt})`;
+	const row = frm.doc.custom_costing_summary.find((r) => r.description === description);
+	if (!row) return;
+
+	row.weight = summary_item.bw || 0;
+	row.wastage_weight = calculate_percent_value(row.wastage_percentage || 10, row.weight);
+	row.total_weight = calculate_total_wastage(row.weight, row.wastage_weight);
+	row.total_rate = calculate_total_rate(row.charges_rate, row.material_rate);
+	row.total_cost = !row.total_area ? calculate_total_cost(row.total_weight, row.total_rate) : 0;
+
+	frm.refresh_field("custom_costing_summary");
+}
+
+async function update_costing_powder_row(frm, powder_item) {
+	const description = `Powder Coating (${powder_item.range})`;
+	const row = frm.doc.custom_costing_summary.find((r) => r.description === description);
+	if (!row) return;
+
+	row.total_area = powder_item.area || 0;
+	frm.refresh_field("custom_costing_summary");
+}
+
+async function update_costing_hardware_row(frm) {
+	const hardware_row = frm.doc.custom_costing_summary.find(
+		(r) => r.description === "Hardware Cost"
+	);
+	if (!hardware_row) return;
+
+	const hardware_total = frm.doc.custom_hardware_summary?.find(
+		(row) => row.hs_item_name === "Total"
+	);
+	hardware_row.total_cost = hardware_total ? hardware_total.hs_total_cost || 0 : 0;
+
+	frm.refresh_field("custom_costing_summary");
+}
+
+async function update_costing_operation_rows(frm) {
+	const total_weight = frm.doc.custom_summary.reduce((sum, item) => sum + (item.bw || 0), 0);
+	const total_area = frm.doc.custom_summary.reduce((sum, item) => sum + (item.ar || 0), 0);
+
+	frm.doc.custom_costing_summary.forEach((row) => {
+		if (row.row_type === "operation") {
+			// Find the corresponding operation from stored data
+			const operation = frm.operation_master_list.find(
+				(op) => op.cm_charges_name === row.description
+			);
+			if (operation) {
+				row.weight = operation.cm_type === "Weight" ? total_weight : 0;
+				row.total_weight = row.weight;
+				row.total_area = operation.cm_type === "Area" ? total_area : 0;
+			}
+		}
+	});
+
+	frm.refresh_field("custom_costing_summary");
+}
+
+function calculate_and_set_total_cost(frm) {
+	const rows = frm.doc.custom_costing_summary || [];
+	if (rows.length >= 3) {
+		const sum_rows = rows.slice(0, -3);
+		const sub_total = sum_rows.reduce(
+			(sum, item) => sum + (parseFloat(item.total_cost) || 0),
+			0
+		);
+
+		const sub_total_row = rows[rows.length - 3];
+		sub_total_row.total_cost = sub_total;
+
+		const development_charges = parseFloat(rows[rows.length - 2].total_cost) || 0;
+
+		const total_cost = sub_total + development_charges;
+
+		const total_row = rows[rows.length - 1];
+		total_row.total_cost = total_cost;
+
+		frm.doc.raw_material_cost = total_cost;
+		frm.refresh_field("raw_material_cost");
+		frm.refresh_field("custom_costing_summary");
+	}
+}
+
+async function get_operation_master() {
+	return await frappe.db.get_list("Operation Charges Master", {
+		filters: {
+			is_valid_in_costing_summary: 1,
+		},
+		fields: ["cm_charges_name", "cm_type"],
+		limit: 50,
+	});
+}
+
+async function calculate_summary_total(frm) {
+	let total_weight = 0;
+	let total_area = 0;
+	frm.doc.custom_summary.forEach(async (item) => {
+		total_weight += item.bw;
+		total_area += item.ar;
+	});
+	return { total_weight, total_area };
+}
+function set_costing_table_total_rate(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	const total_rate = calculate_total_rate(row.charges_rate, row.material_rate);
+	frappe.model.set_value(cdt, cdn, "total_rate", total_rate);
+}
+
+function calculate_total_rate(charges_rate, material_rate) {
+	const charge = parseFloat(charges_rate) || 0;
+	const material = parseFloat(material_rate) || 0;
+	return parseFloat((charge + material).toFixed(3));
+}
+
+function calculate_total_wastage(weight, wastage_weight) {
+	const w = parseFloat(weight) || 0;
+	const wastage = parseFloat(wastage_weight) || 0;
+	return parseFloat((w - wastage).toFixed(3));
+}
+
+function calculate_total_cost(value, total_rate) {
+	const val = parseFloat(value) || 0;
+	const rate = parseFloat(total_rate) || 0;
+	return parseFloat((val * rate).toFixed(3));
+}
+
+function calculate_percent_value(percentage, total) {
+	const percent = parseFloat(percentage) || 0;
+	const tot = parseFloat(total) || 0;
+	return parseFloat(((percent / 100) * tot).toFixed(3));
+}
+
+function set_total_cost(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+
+	const total_area = parseFloat(row.total_area) || 0;
+	const total_weight = parseFloat(row.total_weight) || 0;
+	const total_rate = parseFloat(row.total_rate) || 0;
+
+	let total_cost = 0;
+
+	if (total_area > 0) {
+		total_cost = calculate_total_cost(total_area, total_rate);
+	} else if (total_weight > 0) {
+		total_cost = calculate_total_cost(total_weight, total_rate);
+	}
+
+	frappe.model.set_value(cdt, cdn, "total_cost", parseFloat(total_cost.toFixed(2)) || 0);
+}
+
+function set_total_wastage(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	frappe.model.set_value(
+		cdt,
+		cdn,
+		"total_weight",
+		calculate_total_wastage(row.weight, row.wastage_weight)
+	);
+}
+
+function get_material_rate(summary, today, range_length, range_thickness) {
+	const expected_label =
+		range_thickness === "Till 3 MM" ? "Punching, Bending & Fab." : "Laser, Bending & Fab.";
+
+	return (
+		summary
+			.filter(
+				(row) =>
+					row.type === "Operation Charges" &&
+					row.selected_item === expected_label &&
+					row.range === range_length &&
+					(!row.valid_from || frappe.datetime.str_to_obj(row.valid_from) <= today) &&
+					(!row.valid_till || frappe.datetime.str_to_obj(row.valid_till) >= today)
+			)
+			.sort((a, b) => {
+				const a_from = a.valid_from ? frappe.datetime.str_to_obj(a.valid_from) : 0;
+				const b_from = b.valid_from ? frappe.datetime.str_to_obj(b.valid_from) : 0;
+				return b_from - a_from;
+			})
+			.map((r) => parseFloat(r.rate) || 0)[0] || 0
+	);
+}
+
+function get_charges_rate(summary, row_type, today, item_group, range_val) {
+	return (
+		summary
+			.filter(
+				(row) =>
+					row.type === row_type &&
+					row.selected_item === item_group &&
+					row.range === range_val &&
+					(!row.valid_from || frappe.datetime.str_to_obj(row.valid_from) <= today) &&
+					(!row.valid_till || frappe.datetime.str_to_obj(row.valid_till) >= today)
+			)
+			.sort((a, b) => {
+				const b_from = b.valid_from ? frappe.datetime.str_to_obj(b.valid_from) : 0;
+				const a_from = a.valid_from ? frappe.datetime.str_to_obj(a.valid_from) : 0;
+				return b_from - a_from;
+			})
+			.map((r) => parseFloat(r.rate) || 0)[0] || 0
+	);
+}
+
+function set_calculated_percent_value(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+
+	if (row.description === "H.C" || row.description === "Development Cost") {
+		const current_idx = row.idx || 1;
+		const previous_rows = frm.doc.custom_costing_summary || [];
+		const previous_row = previous_rows.find((r) => r.idx === current_idx - 1);
+
+		if (previous_row.total_cost) {
+			const previous_total_cost = parseFloat(previous_row.total_cost) || 0;
+			const wastage_percentage = parseFloat(row.wastage_percentage) || 0;
+			const wastage_amount = calculate_percent_value(
+				wastage_percentage,
+				previous_total_cost
+			);
+			const new_total_cost = wastage_amount;
+
+			frappe.model.set_value(
+				cdt,
+				cdn,
+				"total_cost",
+				parseFloat(new_total_cost.toFixed(3)) || 0
+			);
+		}
+	} else {
+		const percent_value = calculate_percent_value(
+			row.wastage_percentage || 0,
+			row.weight || 0
+		);
+		frappe.model.set_value(
+			cdt,
+			cdn,
+			"wastage_weight",
+			parseFloat(percent_value.toFixed(3)) || 0
+		);
+		set_total_wastage(frm, cdt, cdn);
 	}
 }
 
