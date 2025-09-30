@@ -94,6 +94,15 @@ frappe.ui.form.on("BOM Final Costing Esoft", {
 	},
 });
 
+frappe.ui.form.on("BOM Creator Additional Cost", {
+	amount: function (frm, cdt, cdn) {
+		calculate_and_set_total_cost(frm);
+	},
+	custom_additional_costs_remove: function (frm) {
+		calculate_and_set_total_cost(frm);
+	},
+});
+
 function set_defaults(frm) {
 	set_summary_cache(frm);
 	set_operation_list(frm);
@@ -186,6 +195,7 @@ function set_thickness_range(cdt, cdn) {
 }
 
 async function set_summary_cache(frm) {
+	// frappe.local.cache use this for caching
 	frm.summary_cache = new Map();
 	frm.item_contributions = new Map();
 	if (!frm.doc.custom_summary || frm.doc.custom_summary.length === 0) {
@@ -713,31 +723,76 @@ async function update_costing_operation_rows(frm) {
 	frm.refresh_field("custom_costing_summary");
 }
 
-function calculate_and_set_total_cost(frm) {
-	const rows = frm.doc.custom_costing_summary || [];
-	if (rows.length >= 3) {
-		const sum_rows = rows.slice(0, -3);
-		const sub_total = sum_rows.reduce(
-			(sum, item) => sum + (parseFloat(item.total_cost) || 0),
-			0
-		);
+// function calculate_and_set_total_cost(frm) {
+// 	const rows = frm.doc.custom_costing_summary || [];
+// 	if (rows.length >= 3) {
+// 		const sum_rows = rows.slice(0, -3);
+// 		const sub_total = sum_rows.reduce(
+// 			(sum, item) => sum + (parseFloat(item.total_cost) || 0),
+// 			0
+// 		);
 
-		const sub_total_row = rows[rows.length - 3];
-		sub_total_row.total_cost = sub_total;
+// 		const sub_total_row = rows[rows.length - 3];
+// 		sub_total_row.total_cost = sub_total;
 
-		const development_charges = parseFloat(rows[rows.length - 2].total_cost) || 0;
+// 		const development_charges = parseFloat(rows[rows.length - 2].total_cost) || 0;
 
-		const total_cost = sub_total + development_charges;
+// 		const total_cost = sub_total + development_charges;
 
-		const total_row = rows[rows.length - 1];
-		total_row.total_cost = total_cost;
+// 		const total_row = rows[rows.length - 1];
+// 		total_row.total_cost = total_cost;
 
-		frm.doc.raw_material_cost = total_cost;
-		frm.refresh_field("raw_material_cost");
-		frm.refresh_field("custom_costing_summary");
-	}
+// 		const additional_costs = frm.doc.custom_additional_costs || [];
+// 		const total_additional_cost = additional_costs.reduce(
+// 			(sum, item) => sum + (parseFloat(item.amount) || 0),
+// 			0
+// 		);
+// 		frm.doc.raw_material_cost = total_cost + total_additional_cost;
+// 		frm.refresh_field("raw_material_cost");
+// 		frm.refresh_field("custom_costing_summary");
+// 	}
+// }
+function calculate_summary_sub_total(rows) {
+	const sum_rows = rows.slice(0, -3);
+	return sum_rows.reduce((sum, item) => sum + (parseFloat(item.total_cost) || 0), 0);
 }
 
+function calculate_total_additional_cost(frm) {
+	const additional_costs = frm.doc.custom_additional_costs || [];
+	return additional_costs.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+}
+
+function update_total_in_summary_table(frm, sub_total) {
+	const rows = frm.doc.custom_costing_summary;
+
+	rows[rows.length - 3].total_cost = sub_total;
+
+	const development_charges = parseFloat(rows[rows.length - 2].total_cost) || 0;
+
+	const total_cost = sub_total + development_charges;
+	rows[rows.length - 1].total_cost = total_cost;
+
+	return total_cost;
+}
+
+function calculate_and_set_total_cost(frm) {
+	const costing_rows = frm.doc.custom_costing_summary || [];
+
+	if (costing_rows.length < 3) {
+		return;
+	}
+
+	const sub_total = calculate_summary_sub_total(costing_rows);
+
+	const summary_total = update_total_in_summary_table(frm, sub_total);
+
+	const additional_cost_total = calculate_total_additional_cost(frm);
+
+	frm.doc.raw_material_cost = summary_total + additional_cost_total;
+
+	frm.refresh_field("raw_material_cost");
+	frm.refresh_field("custom_costing_summary");
+}
 async function get_operation_master() {
 	return await frappe.db.get_list("Operation Charges Master", {
 		filters: {

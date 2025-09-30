@@ -131,10 +131,7 @@ doctype_js = {"BOM Creator": "public/js/bom_creator.js"}
 # ---------------
 # Override standard doctype classes
 
-# override_doctype_class = {
-# 	"ToDo": "custom_app.overrides.CustomToDo"
-# }
-
+override_doctype_class = {"BOM Creator": "esoft_bom_creator.public.py.bom_creator.BomCreator"}
 # Document Events
 # ---------------
 # Hook on document methods and events
