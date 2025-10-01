@@ -16,7 +16,7 @@ frappe.ui.form.on("BOM Creator Item", {
 	},
 	custom_length: (frm, cdt, cdn) => {
 		recalc_row(frm, cdt, cdn);
-		set_length_range(cdt, cdn);
+		// set_length_range(cdt, cdn);
 	},
 	custom_width: (frm, cdt, cdn) => {
 		recalc_row(frm, cdt, cdn);
@@ -27,14 +27,14 @@ frappe.ui.form.on("BOM Creator Item", {
 	},
 	qty: (frm, cdt, cdn) => {
 		recalc_row(frm, cdt, cdn);
-		update_summary_for_row(frm, cdt, cdn);
+		// update_summary_for_row(frm, cdt, cdn);
 	},
 	custom_blwt: (frm, cdt, cdn) => {
 		handle_item_change(frm, cdt, cdn);
 	},
 	custom_area_sqft: (frm, cdt, cdn) => {
 		handle_item_change(frm, cdt, cdn);
-		update_summary_for_row(frm, cdt, cdn);
+		// update_summary_for_row(frm, cdt, cdn);
 	},
 	custom_add_operation: (frm, cdt, cdn) => {
 		open_operation_dialog(frm, cdt, cdn);
@@ -143,7 +143,7 @@ async function init_row(frm, cdt, cdn) {
 	frappe.model.set_value(cdt, cdn, "custom_width", width);
 	frappe.model.set_value(cdt, cdn, "custom_thickness", thickness);
 
-	frappe.model.set_value(cdt, cdn, "custom_density", density);
+	// frappe.model.set_value(cdt, cdn, "custom_density", density);
 
 	recalc_row(frm, cdt, cdn);
 
@@ -163,6 +163,18 @@ async function recalc_row(frm, cdt, cdn) {
 	const blwt = calculate_blank_weight(l, w, t, qty, row.custom_density);
 	const area = calculate_area_sq_ft(l, w, qty);
 
+	const row_values = {
+		range_length: row.custom_range,
+		new_range: row.custom_length > 3000 ? "Above 3 Mtrs" : "Till 3 Mtrs",
+		blwt: row.custom_blwt,
+		area: row.custom_area_sqft,
+		new_blwt: blwt,
+		new_area: area,
+		qty: row.qty,
+	};
+
+	update_summary_for_row(row_values, frm, cdt, cdn);
+	set_length_range(cdt, cdn);
 	frappe.model.set_value(cdt, cdn, "custom_blwt", blwt);
 	frappe.model.set_value(cdt, cdn, "custom_area_sqft", area);
 }
@@ -226,6 +238,7 @@ async function handle_item_change(frm, cdt, cdn) {
 	if (!item.custom_material) return;
 
 	const old_values = item.old_values || {};
+
 	const new_values = {
 		material: item.custom_material,
 		thickness: item.custom_rangethickness,
@@ -261,7 +274,6 @@ async function handle_item_change(frm, cdt, cdn) {
 	summary_entry.ar += parseFloat(new_values.area) || 0;
 
 	update_summary_table(frm);
-
 	item.old_values = { ...new_values };
 }
 
@@ -414,20 +426,139 @@ function refresh_summary_tables(frm) {
 	frm.refresh_field("custom_costing_summary");
 }
 
-function update_summary_for_row(frm, cdt, cdn) {
+function update_summary_for_row(row_values, frm, cdt, cdn) {
 	const row = locals[cdt][cdn];
 
-	const d_qty = (parseFloat(row.qty) || 0) - (row._original_qty || 0);
-	const d_area = (parseFloat(row.custom_area_sqft) || 0) - (row._original_area || 0);
-
-	row._original_qty = parseFloat(row.qty) || 0;
-	row._original_area = parseFloat(row.custom_area_sqft) || 0;
+	const d_qty = (parseFloat(row.qty) || 0) - (row.custom_previous_qty || 0);
+	const new_area = parseFloat(row_values.new_area) || 0;
+	const old_area = parseFloat(row_values.area) || 0;
+	const old_range = row_values.range_length;
+	const new_range = row_values.new_range;
 
 	if (frm.hw_groups.includes(row.item_group)) {
 		adjust_hardware_row(frm, row, d_qty);
+		frappe.model.set_value(cdt, cdn, "custom_previous_qty", parseFloat(row.qty) || 0);
 		recalc_hardware_totals(frm);
 	} else if (frm.powder_groups.includes(row.item_group)) {
-		adjust_powder_row(frm, row, d_area);
+		let summary = frm.doc.custom_powder_coating_summary || [];
+
+		if (old_range === new_range || !old_range) {
+			const delta = new_area - old_area;
+
+			if (delta !== 0 || new_area > 0) {
+				const idx = summary.findIndex((r) => r.range === new_range);
+
+				if (idx === -1) {
+					if (new_area > 0) {
+						console.log(
+							"Adding new row for range:",
+							new_range,
+							"with area:",
+							new_area
+						);
+
+						const current_length = summary.length;
+						frm.doc.custom_powder_coating_summary.pop();
+						const new_row = frm.add_child("custom_powder_coating_summary");
+						frappe.model.set_value(
+							new_row.doctype,
+							new_row.name,
+							"item_group",
+							"Powder Coating"
+						);
+						frappe.model.set_value(new_row.doctype, new_row.name, "range", new_range);
+						frappe.model.set_value(new_row.doctype, new_row.name, "area", new_area);
+						frm.refresh_field("custom_powder_coating_summary");
+						summary = frm.doc.custom_powder_coating_summary;
+
+						const total_row = frm.add_child("custom_powder_coating_summary");
+						frappe.model.set_value(
+							total_row.doctype,
+							total_row.name,
+							"item_group",
+							"Total"
+						);
+						frappe.model.set_value(total_row.doctype, total_row.name, "range", "");
+						frappe.model.set_value(total_row.doctype, total_row.name, "area", 0);
+						// If the previous last row was Total, swap to keep Total last
+						if (current_length > 0 && summary[current_length - 1].range === "Total") {
+							const temp = summary[current_length];
+							summary[current_length] = summary[current_length - 1];
+							summary[current_length - 1] = temp;
+							frm.refresh_field("custom_powder_coating_summary");
+						}
+					}
+				} else {
+					const srow = summary[idx];
+					console.log(srow);
+
+					const updated_area = (parseFloat(srow.area) || 0) + delta;
+					if (updated_area <= 0) {
+						// Remove row
+						frm.doc.custom_powder_coating_summary.splice(idx, 1);
+						frm.refresh_field("custom_powder_coating_summary");
+					} else {
+						frappe.model.set_value(srow.doctype, srow.name, "area", updated_area);
+					}
+				}
+			}
+		} else {
+			if (old_area > 0 && old_range) {
+				const old_idx = summary.findIndex((r) => r.range === old_range);
+
+				if (old_idx !== -1) {
+					const srow = summary[old_idx];
+					const updated_area = (parseFloat(srow.area) || 0) - old_area;
+					if (updated_area <= 0) {
+						frm.doc.custom_powder_coating_summary.splice(old_idx, 1);
+						frm.refresh_field("custom_powder_coating_summary");
+					} else {
+						frappe.model.set_value(srow.doctype, srow.name, "area", updated_area);
+					}
+				}
+			}
+
+			// Add to new range
+			if (new_area > 0 && new_range) {
+				const idx = summary.findIndex((r) => r.range === new_range);
+				if (idx === -1) {
+					// Add new row
+					frm.doc.custom_powder_coating_summary.pop();
+					const new_row = frm.add_child("custom_powder_coating_summary");
+					frappe.model.set_value(
+						new_row.doctype,
+						new_row.name,
+						"item_group",
+						"Powder Coating"
+					);
+					frappe.model.set_value(new_row.doctype, new_row.name, "range", new_range);
+					frappe.model.set_value(new_row.doctype, new_row.name, "area", new_area);
+					frm.refresh_field("custom_powder_coating_summary");
+					summary = frm.doc.custom_powder_coating_summary;
+
+					// Re-add Total row
+					const total_row = frm.add_child("custom_powder_coating_summary");
+					frappe.model.set_value(
+						total_row.doctype,
+						total_row.name,
+						"item_group",
+						"Total"
+					);
+					frappe.model.set_value(total_row.doctype, total_row.name, "range", "");
+					frappe.model.set_value(total_row.doctype, total_row.name, "area", 0);
+				} else {
+					const srow = summary[idx];
+
+					const updated_area = (parseFloat(srow.area) || 0) + new_area;
+					if (updated_area <= 0) {
+						frm.doc.custom_powder_coating_summary.splice(idx, 1);
+						frm.refresh_field("custom_powder_coating_summary");
+					} else {
+						frappe.model.set_value(srow.doctype, srow.name, "area", updated_area);
+					}
+				}
+			}
+		}
 		recalc_powder_totals(frm);
 	}
 
@@ -532,11 +663,34 @@ function adjust_hardware_row(frm, item_row, d_qty) {
 function adjust_powder_row(frm, item_row, d_area) {
 	const summary = frm.doc.custom_powder_coating_summary || [];
 	const idx = summary.findIndex((r) => r.range === item_row.custom_range);
-	if (idx === -1) return;
+
+	// if not found, create a new summary row for this range
+	if (idx === -1) {
+		// create child row in the custom_powder_coating_summary table
+		const new_row = frm.add_child("custom_powder_coating_summary");
+
+		// set the range and initial area (use d_area as the starting area)
+		// we use frappe.model.set_value to ensure proper client-side events/fire handlers run
+		frappe.model.set_value(new_row.doctype, new_row.name, "range", item_row.custom_range);
+		frappe.model.set_value(
+			new_row.doctype,
+			new_row.name,
+			"area",
+			(parseFloat(new_row.area) || 0) + (parseFloat(d_area) || 0)
+		);
+
+		// if there are other mandatory fields on the child doctype, set them here:
+		// frappe.model.set_value(new_row.doctype, new_row.name, 'selected_item', item_row.item_code || '');
+		// frappe.model.set_value(new_row.doctype, new_row.name, 'rate', 0);
+
+		// refresh the field so UI updates immediately
+		frm.refresh_field("custom_powder_coating_summary");
+
+		return;
+	}
 
 	const srow = summary[idx];
-	const new_area = (parseFloat(srow.area) || 0) + d_area;
-
+	const new_area = (parseFloat(srow.area) || 0) + (parseFloat(d_area) || 0);
 	frappe.model.set_value(srow.doctype, srow.name, "area", new_area);
 }
 
@@ -956,7 +1110,7 @@ async function fetch_customer_pricing(frm) {
 	try {
 		return await frappe.db.get_doc("Customer Item Group Wise Price", frm.doc.custom_customer);
 	} catch (error) {
-		frappe.throw("The price list for the selected customer is not available.");
+		frappe.msgprint("The price list for the selected customer is not available.");
 	}
 }
 
