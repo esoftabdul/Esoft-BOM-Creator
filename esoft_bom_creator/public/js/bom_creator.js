@@ -96,10 +96,10 @@ frappe.ui.form.on("BOM Final Costing Esoft", {
 
 frappe.ui.form.on("BOM Creator Additional Cost", {
 	amount: function (frm, cdt, cdn) {
-		calculate_and_set_total_cost(frm);
+		update_costing_additional_row(frm);
 	},
 	custom_additional_costs_remove: function (frm) {
-		calculate_and_set_total_cost(frm);
+		update_costing_additional_row(frm);
 	},
 });
 
@@ -810,6 +810,10 @@ async function populate_costing_summary(frm) {
 	const development_row = frm.add_child("custom_costing_summary");
 	development_row.description = "Development Cost";
 
+	const additional_cost = frm.add_child("custom_costing_summary");
+	additional_cost.description = "Additional Cost";
+	additional_cost.total_cost = 0;
+
 	const final_row = frm.add_child("custom_costing_summary");
 	final_row.description = "Final Cost";
 	final_row.total_cost = sub_total || 0; // Adjust if development cost is added
@@ -839,6 +843,7 @@ async function update_costing_powder_row(frm, powder_item) {
 	if (!row) return;
 
 	row.total_area = powder_item.area || 0;
+	calculate_and_set_total_cost(frm);
 	frm.refresh_field("custom_costing_summary");
 }
 
@@ -852,7 +857,19 @@ async function update_costing_hardware_row(frm) {
 		(row) => row.hs_item_name === "Total"
 	);
 	hardware_row.total_cost = hardware_total ? hardware_total.hs_total_cost || 0 : 0;
+	calculate_and_set_total_cost(frm);
+	frm.refresh_field("custom_costing_summary");
+}
 
+async function update_costing_additional_row(frm) {
+	const additional_row = frm.doc.custom_costing_summary.find(
+		(r) => r.description === "Additional Cost"
+	);
+	if (!additional_row) return;
+
+	const additional_total = calculate_total_additional_cost(frm);
+	additional_row.total_cost = additional_total || 0;
+	calculate_and_set_total_cost(frm);
 	frm.refresh_field("custom_costing_summary");
 }
 
@@ -873,7 +890,7 @@ async function update_costing_operation_rows(frm) {
 			}
 		}
 	});
-
+	calculate_and_set_total_cost(frm);
 	frm.refresh_field("custom_costing_summary");
 }
 
@@ -907,7 +924,8 @@ async function update_costing_operation_rows(frm) {
 // 	}
 // }
 function calculate_summary_sub_total(rows) {
-	const sum_rows = rows.slice(0, -3);
+	const sum_rows = rows.slice(0, -4);
+
 	return sum_rows.reduce((sum, item) => sum + (parseFloat(item.total_cost) || 0), 0);
 }
 
@@ -919,11 +937,12 @@ function calculate_total_additional_cost(frm) {
 function update_total_in_summary_table(frm, sub_total) {
 	const rows = frm.doc.custom_costing_summary;
 
-	rows[rows.length - 3].total_cost = sub_total;
+	rows[rows.length - 4].total_cost = sub_total;
 
-	const development_charges = parseFloat(rows[rows.length - 2].total_cost) || 0;
+	const development_charges = parseFloat(rows[rows.length - 3].total_cost) || 0;
+	const additional_cost = parseFloat(rows[rows.length - 2].total_cost) || 0;
 
-	const total_cost = sub_total + development_charges;
+	const total_cost = sub_total + development_charges + additional_cost;
 	rows[rows.length - 1].total_cost = total_cost;
 
 	return total_cost;
@@ -940,9 +959,7 @@ function calculate_and_set_total_cost(frm) {
 
 	const summary_total = update_total_in_summary_table(frm, sub_total);
 
-	const additional_cost_total = calculate_total_additional_cost(frm);
-
-	frm.doc.raw_material_cost = summary_total + additional_cost_total;
+	frm.doc.raw_material_cost = summary_total;
 
 	frm.refresh_field("raw_material_cost");
 	frm.refresh_field("custom_costing_summary");
