@@ -1,0 +1,85 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:customer",
+ "creation": "2025-07-09 14:26:11.922457",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "customer",
+  "section_break_oldp",
+  "items",
+  "amended_from",
+  "section_break_oiow",
+  "hardware_and_bo_summary"
+ ],
+ "fields": [
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Customer",
+   "options": "Customer",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "section_break_oldp",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "Customer Item Group Item Pricing"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Customer Item Group Wise Price",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "section_break_oiow",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "hardware_and_bo_summary",
+   "fieldtype": "Table",
+   "label": "Hardware and BO Summary",
+   "options": "Customer Item Group Other Pricing"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2025-07-09 16:10:37.489699",
+ "modified_by": "Administrator",
+ "module": "Esoft Bom Creator",
+ "name": "Customer Item Group Wise Price",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

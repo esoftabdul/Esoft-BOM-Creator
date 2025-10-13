@@ -1,0 +1,59 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-06-23 14:51:37.346072",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "ig",
+  "rl",
+  "rt",
+  "bw",
+  "ar"
+ ],
+ "fields": [
+  {
+   "fieldname": "ig",
+   "fieldtype": "Link",
+   "label": "Item Group",
+   "options": "Item Group"
+  },
+  {
+   "fieldname": "rl",
+   "fieldtype": "Data",
+   "label": "Range(L)"
+  },
+  {
+   "fieldname": "rt",
+   "fieldtype": "Data",
+   "label": "Range(T)"
+  },
+  {
+   "fieldname": "bw",
+   "fieldtype": "Float",
+   "label": "Weight",
+   "precision": "3"
+  },
+  {
+   "fieldname": "ar",
+   "fieldtype": "Float",
+   "label": "Area",
+   "precision": "3"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-07-11 17:44:49.506975",
+ "modified_by": "Administrator",
+ "module": "Esoft Bom Creator",
+ "name": "BOM Material Summary",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
