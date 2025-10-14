@@ -274,6 +274,11 @@ async function handle_item_change(frm, cdt, cdn) {
 	summary_entry.ar += parseFloat(new_values.area) || 0;
 
 	update_summary_table(frm);
+
+	await sync_costing_material_rows(frm);
+	update_costing_operation_rows(frm);
+	calculate_and_set_total_cost(frm);
+
 	item.old_values = { ...new_values };
 }
 
@@ -656,6 +661,11 @@ function adjust_hardware_row(frm, item_row, d_qty) {
 	const summary = frm.doc.custom_hardware_summary || [];
 	const idx = summary.findIndex((r) => r.hs_item_name === item_row.item_code);
 
+	if (idx === -1) {
+		// To handle adding new hardware row, but since the user may have this bug too, we can add logic similar to above, but for now, assuming it's handled in other places or add if needed.
+		return;
+	}
+
 	const srow = summary[idx];
 	const new_qty = (parseFloat(srow.hs_qty) || 0) + d_qty;
 	const new_cost = new_qty * (parseFloat(srow.hs_unit_price) || 0);
@@ -878,6 +888,7 @@ function update_costing_summary_row(frm, summary_item) {
 
 async function update_costing_powder_row(frm, powder_item) {
 	const description = `Powder Coating (${powder_item.range})`;
+
 	const row = frm.doc.custom_costing_summary.find((r) => r.description === description);
 	if (!row) return;
 
@@ -1214,4 +1225,81 @@ async function hardware_price_change(frm, cdt, cdn) {
 	let totalcost = parseFloat(row.hs_unit_price) * parseFloat(row.hs_qty);
 	frappe.model.set_value(cdt, cdn, "hs_total_cost", totalcost);
 	recalc_hardware_totals(frm);
+}
+
+async function sync_costing_material_rows(frm) {
+	// Iterate through custom_costing_summary until a powder row is encountered
+	const material_rows = [];
+	for (const row of frm.doc.custom_costing_summary || []) {
+		if (row.description && row.description.startsWith("Powder")) {
+			break; // Stop at the first powder coating row
+		}
+		if (row.description && row.description.includes(" & ")) {
+			material_rows.push(row);
+		}
+	}
+
+	// Process each material row
+	for (const costing_row of material_rows) {
+		// Extract the item group (ig) from description using regex
+		const match = costing_row.description.match(/^[^(]+/);
+		const item_group = match ? match[0].trim() : null;
+
+		if (!item_group) continue;
+
+		// Extract range length (rl) and range thickness (rt) from description
+		const range_match = costing_row.description.match(/\((\w.*?) & (\w.*?)\)/);
+		const range_length = range_match ? range_match[1] : null;
+		const range_thickness = range_match ? range_match[2] : null;
+
+		if (!range_length || !range_thickness) continue;
+
+		// Find corresponding row in custom_summary
+		const summary_row = frm.doc.custom_summary.find(
+			(s) =>
+				s.ig === item_group &&
+				s.rl === range_length &&
+				s.rt === range_thickness
+		);
+
+		if (!summary_row) continue;
+
+		// Update only weight-related fields, preserving other fields
+		const new_weight = parseFloat(summary_row.bw) || 0;
+		const new_wastage_weight = calculate_percent_value(10, new_weight);
+		const new_total_weight = calculate_total_wastage(new_weight, new_wastage_weight);
+		const existing_total_rate = parseFloat(costing_row.total_rate) || 0;
+
+		frappe.model.set_value(
+			costing_row.doctype,
+			costing_row.name,
+			"weight",
+			new_weight
+		);
+		frappe.model.set_value(
+			costing_row.doctype,
+			costing_row.name,
+			"wastage_weight",
+			new_wastage_weight
+		);
+		frappe.model.set_value(
+			costing_row.doctype,
+			costing_row.name,
+			"total_weight",
+			new_total_weight
+		);
+		const new_total_cost = calculate_total_cost(new_total_weight, existing_total_rate);
+		frappe.model.set_value(
+			costing_row.doctype,
+			costing_row.name,
+			"total_cost",
+			new_total_cost
+		);
+	}
+
+	// Refresh the grid to reflect changes
+	frm.refresh_field("custom_costing_summary");
+
+	// Recalculate totals
+	calculate_and_set_total_cost(frm);
 }
