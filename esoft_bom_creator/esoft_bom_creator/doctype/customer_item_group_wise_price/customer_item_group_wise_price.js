@@ -43,18 +43,52 @@ async function load_operations_master(frm) {
 	];
 }
 
+// async function load_rm_groups(frm) {
+// 	const res = await frappe.call({
+// 		method: "frappe.desk.treeview.get_children",
+// 		args: {
+// 			doctype: "Item Group",
+// 			parent: "RM",
+// 		},
+// 	});
+
+// 	frm.rm_groups = (res.message || []).map((child) => child.value);
+// }
+
 async function load_rm_groups(frm) {
 	const res = await frappe.call({
-		method: "frappe.desk.treeview.get_children",
+		method: "frappe.desk.treeview.get_all_nodes",
 		args: {
 			doctype: "Item Group",
+			label: "RM",
 			parent: "RM",
+			tree_method: "frappe.desk.treeview.get_children",
 		},
 	});
 
-	frm.rm_groups = (res.message || []).map((child) => child.value);
+	frm.rm_groups = res.message ? cleanHierarchicalJson(res.message, "RM") : [];
 }
+function cleanHierarchicalJson(data, root) {
+	const dataMap = {};
+	data.forEach((entry) => {
+		dataMap[entry.parent] = entry.data;
+	});
 
+	function collectItems(parentKey) {
+		const collected = [];
+		const children = dataMap[parentKey] || [];
+
+		children.forEach((item) => {
+			collected.push(item.value);
+			if (item.expandable) {
+				collected.push(...collectItems(item.value));
+			}
+		});
+
+		return collected;
+	}
+	return collectItems(root);
+}
 async function load_operations(frm) {
 	const operations_list = await frappe.db.get_list("Operation", {
 		filters: {
