@@ -42,14 +42,14 @@ frappe.ui.form.on("BOM Creator Item", {
 });
 
 frappe.ui.form.on("BOM Material Summary", {
-	bw: async function (frm, cdt, cdn) {
+	bw: function (frm, cdt, cdn) {
 		const summary_item = locals[cdt][cdn];
-		await update_costing_summary_row(frm, summary_item);
+		update_costing_summary_row(frm, summary_item);
 		update_costing_operation_rows(frm);
 	},
-	ar: async function (frm, cdt, cdn) {
+	ar: function (frm, cdt, cdn) {
 		const summary_item = locals[cdt][cdn];
-		await update_costing_summary_row(frm, summary_item);
+		update_costing_summary_row(frm, summary_item);
 		update_costing_operation_rows(frm);
 	},
 });
@@ -64,7 +64,7 @@ frappe.ui.form.on("BOM Hardware Costing", {
 });
 
 frappe.ui.form.on("BOM Powder Coating Summary", {
-	pcts_total_area: async function (frm, cdt, cdn) {
+	area: async function (frm, cdt, cdn) {
 		const powder_item = locals[cdt][cdn];
 		await update_costing_powder_row(frm, powder_item);
 	},
@@ -655,7 +655,6 @@ function rebuild_powder_summary(frm, powder_agg) {
 function adjust_hardware_row(frm, item_row, d_qty) {
 	const summary = frm.doc.custom_hardware_summary || [];
 	const idx = summary.findIndex((r) => r.hs_item_name === item_row.item_code);
-	if (idx === -1) return;
 
 	const srow = summary[idx];
 	const new_qty = (parseFloat(srow.hs_qty) || 0) + d_qty;
@@ -669,13 +668,9 @@ function adjust_powder_row(frm, item_row, d_area) {
 	const summary = frm.doc.custom_powder_coating_summary || [];
 	const idx = summary.findIndex((r) => r.range === item_row.custom_range);
 
-	// if not found, create a new summary row for this range
 	if (idx === -1) {
-		// create child row in the custom_powder_coating_summary table
 		const new_row = frm.add_child("custom_powder_coating_summary");
 
-		// set the range and initial area (use d_area as the starting area)
-		// we use frappe.model.set_value to ensure proper client-side events/fire handlers run
 		frappe.model.set_value(new_row.doctype, new_row.name, "range", item_row.custom_range);
 		frappe.model.set_value(
 			new_row.doctype,
@@ -684,11 +679,6 @@ function adjust_powder_row(frm, item_row, d_area) {
 			(parseFloat(new_row.area) || 0) + (parseFloat(d_area) || 0)
 		);
 
-		// if there are other mandatory fields on the child doctype, set them here:
-		// frappe.model.set_value(new_row.doctype, new_row.name, 'selected_item', item_row.item_code || '');
-		// frappe.model.set_value(new_row.doctype, new_row.name, 'rate', 0);
-
-		// refresh the field so UI updates immediately
 		frm.refresh_field("custom_powder_coating_summary");
 
 		return;
@@ -757,7 +747,7 @@ async function populate_costing_summary(frm) {
 		row.wastage_weight = calculate_percent_value(row.wastage_percentage, row.weight);
 		row.total_weight = calculate_total_wastage(row.weight, row.wastage_weight);
 		row.total_area = null; // Raw material based on weight, so area is null
-		row.charges_rate = get_charges_rate(summary, "Raw Material", today, item.ig, item.rl);
+		row.material_rate = get_charges_rate(summary, "Raw Material", today, item.ig, item.rl);
 		// row.material_rate = get_material_rate(summary, today, item.rl, item.rt);
 		row.total_rate = calculate_total_rate(row.charges_rate, row.material_rate);
 		row.total_cost = !row.total_area
@@ -811,8 +801,6 @@ async function populate_costing_summary(frm) {
 	const operations_master = frm.operation_master_list || get_operation_master();
 	for (const operation of operations_master || []) {
 		if (operation.cm_charges_name.toLowerCase().includes("laser") && !laser_operation) {
-			console.log("skipping laser");
-
 			continue;
 		}
 		if (operation.cm_charges_name.toLowerCase().includes("punching") && !punching_operation) {
@@ -825,14 +813,12 @@ async function populate_costing_summary(frm) {
 		operation_row.total_area = operation.cm_type === "Area" ? total_area : 0;
 
 		const length_range = operation_row.total_weight > 3000 ? "Above 3 Mtrs" : "Till 3 Mtrs";
-		operation_row.material_rate = get_material_rate(summary, today, operation_row.description, length_range);
+		operation_row.charges_rate = get_material_rate(summary, today, operation_row.description, length_range);
 		operation_row.total_rate = calculate_total_rate(
 			operation_row.charges_rate,
 			operation_row.material_rate || 0
 		);
 		if (operation.cm_type === "Weight" && operation_row.total_weight > 0) {
-			console.log(operation_row.total_weight);
-
 			operation_row.total_cost = operation_row.total_weight
 				? calculate_total_cost(operation_row.total_weight, operation_row.total_rate)
 				: 0;
@@ -872,10 +858,14 @@ async function populate_costing_summary(frm) {
 	frm.refresh_field("custom_costing_summary");
 }
 
-async function update_costing_summary_row(frm, summary_item) {
+function update_costing_summary_row(frm, summary_item) {
 	const description = `${summary_item.ig} (${summary_item.rl} & ${summary_item.rt})`;
 	const row = frm.doc.custom_costing_summary.find((r) => r.description === description);
+	console.log(description, row);
+
 	if (!row) return;
+	console.log("updating row", row);
+
 
 	row.weight = summary_item.bw || 0;
 	row.wastage_weight = calculate_percent_value(row.wastage_percentage || 10, row.weight);
@@ -1135,6 +1125,9 @@ function get_charges_rate(summary, row_type, today, item_group, range_val) {
 
 function set_calculated_percent_value(frm, cdt, cdn) {
 	const row = locals[cdt][cdn];
+	if (row.description === "Sub Total" || row.description === "Additional Cost" || row.description === "Final Cost") {
+		return;
+	}
 
 	if (row.description === "H.C" || row.description === "Development Cost") {
 		const current_idx = row.idx || 1;
