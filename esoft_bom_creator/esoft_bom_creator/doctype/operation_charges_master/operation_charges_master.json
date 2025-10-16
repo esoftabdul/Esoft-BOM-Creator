@@ -29,7 +29,9 @@
   {
    "fieldname": "cm_charges_name",
    "fieldtype": "Data",
-   "label": "Charges Name"
+   "in_list_view": 1,
+   "label": "Charges Name",
+   "reqd": 1
   },
   {
    "fieldname": "cm_type",
@@ -41,6 +43,7 @@
    "default": "0",
    "fieldname": "is_valid_in_costing_summary",
    "fieldtype": "Check",
+   "in_list_view": 1,
    "label": "Is Valid in Costing Summary"
   }
  ],
@@ -48,7 +51,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-07-09 16:13:14.244158",
+ "modified": "2025-10-15 13:02:28.745160",
  "modified_by": "Administrator",
  "module": "Esoft Bom Creator",
  "name": "Operation Charges Master",

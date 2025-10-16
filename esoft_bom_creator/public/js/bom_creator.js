@@ -5,6 +5,7 @@ frappe.ui.form.on("BOM Creator", {
 	custom_customer: function (frm) {
 		map_summary_tables(frm);
 	},
+	custom_repopulate_costing: function (frm) { repopulate_costing_summary(frm); }
 });
 
 frappe.ui.form.on("BOM Creator Item", {
@@ -233,53 +234,54 @@ async function set_groups_cache(frm) {
 }
 
 async function handle_item_change(frm, cdt, cdn) {
-	const item = locals[cdt][cdn];
+	// const item = locals[cdt][cdn];
 
-	if (!item.custom_material) return;
+	// if (!item.custom_material) return;
 
-	const old_values = item.old_values || {};
+	// const old_values = item.old_values || {};
 
-	const new_values = {
-		material: item.custom_material,
-		thickness: item.custom_rangethickness,
-		range: item.custom_range,
-		blwt: item.custom_blwt,
-		area: item.custom_area_sqft,
-	};
+	// const new_values = {
+	// 	material: item.custom_material,
+	// 	thickness: item.custom_rangethickness,
+	// 	range: item.custom_range,
+	// 	blwt: item.custom_blwt,
+	// 	area: item.custom_area_sqft,
+	// };
+	update_full_summary(frm)
 
-	if (old_values.material) {
-		const old_key = `${old_values.material}|${old_values.thickness}|${old_values.range}`;
-		if (frm.summary_cache.has(old_key)) {
-			const summary_entry = frm.summary_cache.get(old_key);
-			summary_entry.bw -= parseFloat(old_values.blwt) || 0;
-			summary_entry.ar -= parseFloat(old_values.area) || 0;
-			if (summary_entry.bw === 0 && summary_entry.ar === 0) {
-				frm.summary_cache.delete(old_key);
-			}
-		}
-	}
+	// if (old_values.material) {
+	// 	const old_key = `${old_values.material}|${old_values.thickness}|${old_values.range}`;
+	// 	if (frm.summary_cache.has(old_key)) {
+	// 		const summary_entry = frm.summary_cache.get(old_key);
+	// 		summary_entry.bw -= parseFloat(old_values.blwt) || 0;
+	// 		summary_entry.ar -= parseFloat(old_values.area) || 0;
+	// 		if (summary_entry.bw === 0 && summary_entry.ar === 0) {
+	// 			frm.summary_cache.delete(old_key);
+	// 		}
+	// 	}
+	// }
 
-	const new_key = `${new_values.material}|${new_values.thickness}|${new_values.range}`;
-	if (!frm.summary_cache.has(new_key)) {
-		frm.summary_cache.set(new_key, {
-			ig: new_values.material,
-			rt: new_values.thickness,
-			rl: new_values.range,
-			bw: 0,
-			ar: 0,
-		});
-	}
-	const summary_entry = frm.summary_cache.get(new_key);
-	summary_entry.bw += parseFloat(new_values.blwt) || 0;
-	summary_entry.ar += parseFloat(new_values.area) || 0;
+	// const new_key = `${new_values.material}|${new_values.thickness}|${new_values.range}`;
+	// if (!frm.summary_cache.has(new_key)) {
+	// 	frm.summary_cache.set(new_key, {
+	// 		ig: new_values.material,
+	// 		rt: new_values.thickness,
+	// 		rl: new_values.range,
+	// 		bw: 0,
+	// 		ar: 0,
+	// 	});
+	// }
+	// const summary_entry = frm.summary_cache.get(new_key);
+	// summary_entry.bw += parseFloat(new_values.blwt) || 0;
+	// summary_entry.ar += parseFloat(new_values.area) || 0;
 
-	update_summary_table(frm);
+	// update_summary_table(frm);
 
 	await sync_costing_material_rows(frm);
 	update_costing_operation_rows(frm);
 	calculate_and_set_total_cost(frm);
 
-	item.old_values = { ...new_values };
+	// item.old_values = { ...new_values };
 }
 
 function update_summary_table(frm) {
@@ -733,11 +735,38 @@ async function populate_costing_summary(frm) {
 	frm.clear_table("custom_costing_summary");
 	const { hardware_and_bo_summary: summary = [] } = await fetch_customer_pricing(frm);
 	const today = frappe.datetime.str_to_obj(frappe.datetime.get_today());
+	// ADD: Create key-value pairs for rl & rt combinations
+	const rl_rt_summary = {};
+
 	let total_weight = 0;
 	let total_area = 0;
 	let sub_total = 0;
 	let laser_operation = false;
 	let punching_operation = false;
+
+	// ADD: First pass to build rl_rt_summary
+	for (const item of frm.doc.custom_summary || []) {
+		const key = `${item.rl} & ${item.rt}`;
+		if (!rl_rt_summary[key]) {
+			rl_rt_summary[key] = {
+				ig: item.ig,
+				rl: item.rl,
+				rt: item.rt,
+				total_weight: 0,
+				total_area: 0,
+				items: []
+			};
+		}
+
+		const weight = item.bw || 0;
+		const area = item.ar || 0;
+		rl_rt_summary[key].total_weight += weight;
+		rl_rt_summary[key].total_area += area;
+		rl_rt_summary[key].items.push(item);
+	}
+
+	// Store the summary in frm.doc for later use
+	frm.doc.rl_rt_summary = rl_rt_summary;
 	// Summary Table
 	for (const item of frm.doc.custom_summary || []) {
 		if (laser_operation == false) {
@@ -807,7 +836,7 @@ async function populate_costing_summary(frm) {
 	const hc_row = frm.add_child("custom_costing_summary");
 	hc_row.description = "H.C";
 
-	// Operation List
+	// Operation List - Modified logic for Laser and Punching
 	const operations_master = frm.operation_master_list || get_operation_master();
 	for (const operation of operations_master || []) {
 		if (operation.cm_charges_name.toLowerCase().includes("laser") && !laser_operation) {
@@ -816,6 +845,108 @@ async function populate_costing_summary(frm) {
 		if (operation.cm_charges_name.toLowerCase().includes("punching") && !punching_operation) {
 			continue;
 		}
+
+		// Special handling for Laser operation - Always create 2 rows if laser_operation is true
+		if (operation.cm_charges_name.toLowerCase().includes("laser") && laser_operation) {
+			const rl_categories = ["Above 3 Mtrs", "Till 3 Mtrs"];
+
+			rl_categories.forEach(rl_category => {
+				// Filter keys that match the RL category and Above 3 MM
+				const matching_keys = Object.keys(rl_rt_summary).filter(key =>
+					key.includes(rl_category) && key.includes("Above 3 MM")
+				);
+
+				if (matching_keys.length > 0) {
+					// Calculate total weight for this specific RL category
+					const category_weight = matching_keys.reduce((sum, key) =>
+						sum + (rl_rt_summary[key].total_weight || 0), 0
+					);
+
+					// Create separate row for each RL category
+					const laser_row = frm.add_child("custom_costing_summary");
+					laser_row.description = `${operation.cm_charges_name} - ${rl_category}`;
+					laser_row.weight = operation.cm_type === "Weight" ? category_weight : 0;
+					laser_row.total_weight = laser_row.weight;
+					laser_row.total_area = operation.cm_type === "Area" ?
+						matching_keys.reduce((sum, key) => sum + (rl_rt_summary[key].total_area || 0), 0) : 0;
+
+					// Get specific rate for this RL category
+					laser_row.charges_rate = get_material_rate(
+						summary,
+						today,
+						operation.cm_charges_name,
+						rl_category
+					);
+
+					laser_row.total_rate = calculate_total_rate(
+						laser_row.charges_rate,
+						laser_row.material_rate || 0
+					);
+
+					// Calculate cost based on type
+					if (operation.cm_type === "Weight" && laser_row.total_weight > 0) {
+						laser_row.total_cost = calculate_total_cost(laser_row.total_weight, laser_row.total_rate);
+						sub_total += laser_row.total_cost || 0;
+					} else if (operation.cm_type === "Area" && laser_row.total_area > 0) {
+						laser_row.total_cost = calculate_total_cost(laser_row.total_area, laser_row.total_rate);
+						sub_total += laser_row.total_cost || 0;
+					}
+				}
+			});
+			continue; // Skip the main operation row since we created 2 specific rows
+		}
+
+		// Special handling for Punching operation - Similar logic but for Till 3 MM
+		if (operation.cm_charges_name.toLowerCase().includes("punching") && punching_operation) {
+			const rl_categories = ["Above 3 Mtrs", "Till 3 Mtrs"];
+
+			rl_categories.forEach(rl_category => {
+				// Filter keys that match the RL category and Till 3 MM
+				const matching_keys = Object.keys(rl_rt_summary).filter(key =>
+					key.includes(rl_category) && key.includes("Till 3 MM")
+				);
+
+				if (matching_keys.length > 0) {
+					// Calculate total weight for this specific RL category
+					const category_weight = matching_keys.reduce((sum, key) =>
+						sum + (rl_rt_summary[key].total_weight || 0), 0
+					);
+
+					// Create separate row for each RL category
+					const punching_row = frm.add_child("custom_costing_summary");
+					punching_row.description = `${operation.cm_charges_name} - ${rl_category}`;
+					punching_row.weight = operation.cm_type === "Weight" ? category_weight : 0;
+					punching_row.total_weight = punching_row.weight;
+					punching_row.total_area = operation.cm_type === "Area" ?
+						matching_keys.reduce((sum, key) => sum + (rl_rt_summary[key].total_area || 0), 0) : 0;
+
+					// Get specific rate for this RL category
+					punching_row.charges_rate = get_material_rate(
+						summary,
+						today,
+						operation.cm_charges_name,
+						rl_category
+					);
+
+					punching_row.total_rate = calculate_total_rate(
+						punching_row.charges_rate,
+						punching_row.material_rate || 0
+					);
+
+					// Calculate cost based on type
+					if (operation.cm_type === "Weight" && punching_row.total_weight > 0) {
+						punching_row.total_cost = calculate_total_cost(punching_row.total_weight, punching_row.total_rate);
+						sub_total += punching_row.total_cost || 0;
+					} else if (operation.cm_type === "Area" && punching_row.total_area > 0) {
+						punching_row.total_cost = calculate_total_cost(punching_row.total_area, punching_row.total_rate);
+						sub_total += punching_row.total_cost || 0;
+					}
+				}
+			});
+			continue;
+		}
+
+		// Original logic for other operations (unchanged)
 		const operation_row = frm.add_child("custom_costing_summary");
 		operation_row.description = `${operation.cm_charges_name}`;
 		operation_row.weight = operation.cm_type === "Weight" ? total_weight : 0;
@@ -842,9 +973,7 @@ async function populate_costing_summary(frm) {
 		} else if (!operation_row.total_area && !operation_row.total_weight && operation_row.total_rate) {
 			operation_row.total_cost = operation_row.total_rate || 0;
 			sub_total += operation_row.total_cost || 0;
-
 		}
-
 	}
 
 	// Total Rows
@@ -988,8 +1117,14 @@ function update_total_in_summary_table(frm, sub_total) {
 	const rows = frm.doc.custom_costing_summary;
 
 	rows[rows.length - 4].total_cost = sub_total;
+	const development_row = rows[rows.length - 3];
 
-	const development_charges = parseFloat(rows[rows.length - 3].total_cost) || 0;
+	const development_charges = parseFloat(calculate_percent_value(
+		development_row.wastage_percentage || 0,
+		sub_total
+	)) || 0;
+	development_row.total_cost = development_charges;
+
 	const additional_cost = parseFloat(rows[rows.length - 2].total_cost) || 0;
 
 	const total_cost = sub_total + development_charges + additional_cost;
@@ -1228,7 +1363,34 @@ async function hardware_price_change(frm, cdt, cdn) {
 }
 
 async function sync_costing_material_rows(frm) {
-	// Iterate through custom_costing_summary until a powder row is encountered
+	// Rebuild rl_rt_summary from current custom_summary
+	const rl_rt_summary = {};
+	for (const item of frm.doc.custom_summary || []) {
+		const key = `${item.rl} & ${item.rt}`;
+		if (!rl_rt_summary[key]) {
+			rl_rt_summary[key] = {
+				ig: item.ig,
+				rl: item.rl,
+				rt: item.rt,
+				total_weight: 0,
+				total_area: 0,
+				items: []
+			};
+		}
+
+		const weight = item.bw || 0;
+		const area = item.ar || 0;
+		rl_rt_summary[key].total_weight += weight;
+		rl_rt_summary[key].total_area += area;
+		rl_rt_summary[key].items.push(item);
+	}
+	frm.doc.rl_rt_summary = rl_rt_summary;
+
+	// Calculate new totals
+	const total_weight = frm.doc.custom_summary.reduce((sum, item) => sum + (parseFloat(item.bw) || 0), 0);
+	const total_area = frm.doc.custom_summary.reduce((sum, item) => sum + (parseFloat(item.ar) || 0), 0);
+
+	// Update material rows (existing logic)
 	const material_rows = [];
 	for (const row of frm.doc.custom_costing_summary || []) {
 		if (row.description && row.description.startsWith("Powder")) {
@@ -1239,7 +1401,6 @@ async function sync_costing_material_rows(frm) {
 		}
 	}
 
-	// Process each material row
 	for (const costing_row of material_rows) {
 		// Extract the item group (ig) from description using regex
 		const match = costing_row.description.match(/^[^(]+/);
@@ -1297,9 +1458,456 @@ async function sync_costing_material_rows(frm) {
 		);
 	}
 
+	// ADD: Update operation rows after material updates
+	update_operation_rows(frm, rl_rt_summary, total_weight, total_area);
+
 	// Refresh the grid to reflect changes
 	frm.refresh_field("custom_costing_summary");
 
 	// Recalculate totals
 	calculate_and_set_total_cost(frm);
+}
+
+// ADD: New function to update operation rows
+function update_operation_rows(frm, rl_rt_summary, total_weight, total_area) {
+	const { hardware_and_bo_summary: summary = [] } = frm.doc; // Assuming summary is available; otherwise fetch it
+	const today = frappe.datetime.get_today(); // Use string for consistency
+
+	// Get laser and punching operations
+	const laser_operation = Object.keys(rl_rt_summary).some(key => key.includes("Above 3 MM"));
+	const punching_operation = Object.keys(rl_rt_summary).some(key => key.includes("Till 3 MM"));
+
+	const operations_master = frm.operation_master_list || get_operation_master(); // Use sync version if needed
+
+	operations_master.forEach((operation) => {
+		if (operation.cm_charges_name.toLowerCase().includes("laser") && !laser_operation) {
+			return;
+		}
+		if (operation.cm_charges_name.toLowerCase().includes("punching") && !punching_operation) {
+			return;
+		}
+
+		// Handle Laser sub-rows
+		if (operation.cm_charges_name.toLowerCase().includes("laser") && laser_operation) {
+			const rl_categories = ["Above 3 Mtrs", "Till 3 Mtrs"];
+			rl_categories.forEach(rl_category => {
+				const row_description = `${operation.cm_charges_name} - ${rl_category}`;
+				const laser_row = frm.doc.custom_costing_summary.find(r => r.description === row_description);
+				if (!laser_row) return;
+
+				const matching_keys = Object.keys(rl_rt_summary).filter(key =>
+					key.includes(rl_category) && key.includes("Above 3 MM")
+				);
+
+				if (matching_keys.length > 0) {
+					const category_weight = matching_keys.reduce((sum, key) =>
+						sum + (rl_rt_summary[key].total_weight || 0), 0
+					);
+					const category_area = matching_keys.reduce((sum, key) =>
+						sum + (rl_rt_summary[key].total_area || 0), 0
+					);
+
+					laser_row.weight = operation.cm_type === "Weight" ? category_weight : 0;
+					laser_row.total_weight = laser_row.weight;
+					laser_row.total_area = operation.cm_type === "Area" ? category_area : 0;
+
+					// laser_row.charges_rate = get_material_rate(
+					// 	summary,
+					// 	today,
+					// 	operation.cm_charges_name,
+					// 	rl_category
+					// );
+
+					laser_row.total_rate = calculate_total_rate(
+						laser_row.charges_rate,
+						laser_row.material_rate || 0
+					);
+
+					if (operation.cm_type === "Weight" && laser_row.total_weight > 0) {
+						laser_row.total_cost = calculate_total_cost(laser_row.total_weight, laser_row.total_rate);
+					} else if (operation.cm_type === "Area" && laser_row.total_area > 0) {
+						laser_row.total_cost = calculate_total_cost(laser_row.total_area, laser_row.total_rate);
+					}
+				}
+			});
+			return;
+		}
+
+		// Handle Punching sub-rows
+		if (operation.cm_charges_name.toLowerCase().includes("punching") && punching_operation) {
+			const rl_categories = ["Above 3 Mtrs", "Till 3 Mtrs"];
+			rl_categories.forEach(rl_category => {
+				const row_description = `${operation.cm_charges_name} - ${rl_category}`;
+				const punching_row = frm.doc.custom_costing_summary.find(r => r.description === row_description);
+				if (!punching_row) return;
+
+				const matching_keys = Object.keys(rl_rt_summary).filter(key =>
+					key.includes(rl_category) && key.includes("Till 3 MM")
+				);
+
+				if (matching_keys.length > 0) {
+					const category_weight = matching_keys.reduce((sum, key) =>
+						sum + (rl_rt_summary[key].total_weight || 0), 0
+					);
+					const category_area = matching_keys.reduce((sum, key) =>
+						sum + (rl_rt_summary[key].total_area || 0), 0
+					);
+
+					punching_row.weight = operation.cm_type === "Weight" ? category_weight : 0;
+					punching_row.total_weight = punching_row.weight;
+					punching_row.total_area = operation.cm_type === "Area" ? category_area : 0;
+
+					// punching_row.charges_rate = get_material_rate(
+					// 	summary,
+					// 	today,
+					// 	operation.cm_charges_name,
+					// 	rl_category
+					// );
+
+					punching_row.total_rate = calculate_total_rate(
+						punching_row.charges_rate,
+						punching_row.material_rate || 0
+					);
+
+					if (operation.cm_type === "Weight" && punching_row.total_weight > 0) {
+						punching_row.total_cost = calculate_total_cost(punching_row.total_weight, punching_row.total_rate);
+					} else if (operation.cm_type === "Area" && punching_row.total_area > 0) {
+						punching_row.total_cost = calculate_total_cost(punching_row.total_area, punching_row.total_rate);
+					}
+				}
+			});
+			return;
+		}
+
+		// Handle other/generic operations
+		const row_description = `${operation.cm_charges_name}`;
+		const operation_row = frm.doc.custom_costing_summary.find(r => r.description === row_description);
+		if (!operation_row) return;
+
+		operation_row.weight = operation.cm_type === "Weight" ? total_weight : 0;
+		operation_row.total_weight = operation_row.weight;
+		operation_row.total_area = operation.cm_type === "Area" ? total_area : 0;
+
+		const length_range = operation_row.total_weight > 3000 ? "Above 3 Mtrs" : "Till 3 Mtrs";
+		// operation_row.charges_rate = get_material_rate(summary, today, operation_row.description, length_range);
+		operation_row.total_rate = calculate_total_rate(
+			operation_row.charges_rate,
+			operation_row.material_rate || 0
+		);
+		if (operation.cm_type === "Weight" && operation_row.total_weight > 0) {
+			operation_row.total_cost = calculate_total_cost(operation_row.total_weight, operation_row.total_rate);
+		} else if (operation.cm_type === "Area" && operation_row.total_area > 0) {
+			operation_row.total_cost = calculate_total_cost(operation_row.total_area, operation_row.total_rate);
+		} else if (!operation_row.total_area && !operation_row.total_weight && operation_row.total_rate) {
+			operation_row.total_cost = operation_row.total_rate || 0;
+		}
+	});
+}
+
+
+
+// New function to repopulate costing summary while preserving specific fields
+async function repopulate_costing_summary(frm) {
+	// Save existing row data to preserve wastage_percentage and rates
+	const preserved_data = new Map();
+	(frm.doc.custom_costing_summary || []).forEach(row => {
+		preserved_data.set(row.description, {
+			wastage_percentage: row.wastage_percentage,
+			charges_rate: row.charges_rate,
+			material_rate: row.material_rate,
+			total_rate: row.total_rate,
+			total_cost: row.total_cost,
+		});
+	});
+
+	// Clear the costing table
+	frm.clear_table("custom_costing_summary");
+
+	// Rebuild the costing table
+	const { hardware_and_bo_summary: summary = [] } = await fetch_customer_pricing(frm);
+	const today = frappe.datetime.str_to_obj(frappe.datetime.get_today());
+
+	// Build rl_rt_summary for material and operation rows
+	const rl_rt_summary = {};
+	let total_weight = 0;
+	let total_area = 0;
+	let laser_operation = false;
+	let punching_operation = false;
+
+	for (const item of frm.doc.custom_summary || []) {
+		const key = `${item.rl} & ${item.rt}`;
+		if (!rl_rt_summary[key]) {
+			rl_rt_summary[key] = {
+				ig: item.ig,
+				rl: item.rl,
+				rt: item.rt,
+				total_weight: 0,
+				total_area: 0,
+				items: [],
+			};
+		}
+		const weight = parseFloat(item.bw) || 0;
+		const area = parseFloat(item.ar) || 0;
+		rl_rt_summary[key].total_weight += weight;
+		rl_rt_summary[key].total_area += area;
+		rl_rt_summary[key].items.push(item);
+		total_weight += weight;
+		total_area += area;
+		if (item.rt === "Above 3 MM") laser_operation = true;
+		if (item.rt === "Till 3 MM") punching_operation = true;
+	}
+	frm.doc.rl_rt_summary = rl_rt_summary;
+
+	// Add material rows
+	for (const item of frm.doc.custom_summary || []) {
+		const description = `${item.ig} (${item.rl} & ${item.rt})`;
+		const row = frm.add_child("custom_costing_summary");
+		row.description = description;
+		row.row_type = "material";
+
+		const pricing_row = summary.find(
+			s =>
+				s.type === "Raw Material" &&
+				s.selected_item === item.ig &&
+				s.range === item.rl &&
+				(!s.valid_from || frappe.datetime.str_to_obj(s.valid_from) <= today) &&
+				(!s.valid_till || frappe.datetime.str_to_obj(s.valid_till) >= today)
+		);
+
+		const material_rate = pricing_row ? parseFloat(pricing_row.rate) || 0 : 0;
+		const preserved = preserved_data.get(description) || {};
+
+		row.weight = parseFloat(item.bw) || 0;
+		row.wastage_percentage = preserved.wastage_percentage || 10;
+		row.wastage_weight = calculate_percent_value(row.wastage_percentage, row.weight);
+		row.total_weight = calculate_total_wastage(row.weight, row.wastage_weight);
+		row.material_rate = preserved.material_rate || material_rate;
+		row.charges_rate = preserved.charges_rate || 0;
+		row.total_rate = preserved.total_rate || calculate_total_rate(row.charges_rate, row.material_rate);
+		row.total_cost = calculate_total_cost(row.total_weight, row.total_rate);
+	}
+
+	// Add powder coating rows
+	for (const item of frm.doc.custom_powder_coating_summary || []) {
+		if (item.item_group === "Total") continue;
+		const description = `Powder Coating (${item.range})`;
+		const row = frm.add_child("custom_costing_summary");
+		row.description = description;
+		row.row_type = "powder";
+
+		const pricing_row = summary.find(
+			s =>
+				s.type === "Powder Coating" &&
+				s.range === item.range &&
+				(!s.valid_from || frappe.datetime.str_to_obj(s.valid_from) <= today) &&
+				(!s.valid_till || frappe.datetime.str_to_obj(s.valid_till) >= today)
+		);
+
+		const material_rate = pricing_row ? parseFloat(pricing_row.rate) || 0 : 0;
+		const preserved = preserved_data.get(description) || {};
+
+		row.total_area = parseFloat(item.area) || 0;
+		row.material_rate = preserved.material_rate || material_rate;
+		row.charges_rate = preserved.charges_rate || 0;
+		row.total_rate = preserved.total_rate || calculate_total_rate(row.charges_rate, row.material_rate);
+		row.total_cost = calculate_total_cost(row.total_area, row.total_rate);
+	}
+
+	// Add operation rows
+	const operations_master = frm.operation_master_list || (await get_operation_master());
+	for (const operation of operations_master) {
+		if (operation.cm_charges_name.toLowerCase().includes("laser") && !laser_operation) continue;
+		if (operation.cm_charges_name.toLowerCase().includes("punching") && !punching_operation) continue;
+
+		if (operation.cm_charges_name.toLowerCase().includes("laser")) {
+			const rl_categories = ["Above 3 Mtrs", "Till 3 Mtrs"];
+			for (const rl_category of rl_categories) {
+				const matching_keys = Object.keys(rl_rt_summary).filter(key => key.includes(rl_category) && key.includes("Above 3 MM"));
+				if (matching_keys.length === 0) continue;
+
+				const description = `${operation.cm_charges_name} - ${rl_category}`;
+				const row = frm.add_child("custom_costing_summary");
+				row.description = description;
+				row.row_type = "operation";
+
+				const category_weight = matching_keys.reduce(
+					(sum, key) => sum + (rl_rt_summary[key].total_weight || 0),
+					0
+				);
+				const category_area = matching_keys.reduce(
+					(sum, key) => sum + (rl_rt_summary[key].total_area || 0),
+					0
+				);
+
+				const pricing_row = summary.find(
+					s =>
+						s.type === "Operation Charges" &&
+						s.selected_item === operation.cm_charges_name &&
+						s.range === rl_category &&
+						(!s.valid_from || frappe.datetime.str_to_obj(s.valid_from) <= today) &&
+						(!s.valid_till || frappe.datetime.str_to_obj(s.valid_till) >= today)
+				);
+
+				const charges_rate = pricing_row ? parseFloat(pricing_row.rate) || 0 : 0;
+				const preserved = preserved_data.get(description) || {};
+
+				row.weight = operation.cm_type === "Weight" ? category_weight : 0;
+				row.total_weight = row.weight;
+				row.total_area = operation.cm_type === "Area" ? category_area : 0;
+				row.charges_rate = preserved.charges_rate || charges_rate;
+				row.material_rate = preserved.material_rate || 0;
+				row.total_rate = preserved.total_rate || calculate_total_rate(row.charges_rate, row.material_rate);
+				row.total_cost =
+					operation.cm_type === "Weight" && row.total_weight > 0
+						? calculate_total_cost(row.total_weight, row.total_rate)
+						: operation.cm_type === "Area" && row.total_area > 0
+							? calculate_total_cost(row.total_area, row.total_rate)
+							: row.total_rate || 0;
+			}
+		} else if (operation.cm_charges_name.toLowerCase().includes("punching")) {
+			const rl_categories = ["Above 3 Mtrs", "Till 3 Mtrs"];
+			for (const rl_category of rl_categories) {
+				const matching_keys = Object.keys(rl_rt_summary).filter(key => key.includes(rl_category) && key.includes("Till 3 MM"));
+				if (matching_keys.length === 0) continue;
+
+				const description = `${operation.cm_charges_name} - ${rl_category}`;
+				const row = frm.add_child("custom_costing_summary");
+				row.description = description;
+				row.row_type = "operation";
+
+				const category_weight = matching_keys.reduce(
+					(sum, key) => sum + (rl_rt_summary[key].total_weight || 0),
+					0
+				);
+				const category_area = matching_keys.reduce(
+					(sum, key) => sum + (rl_rt_summary[key].total_area || 0),
+					0
+				);
+
+				const pricing_row = summary.find(
+					s =>
+						s.type === "Operation Charges" &&
+						s.selected_item === operation.cm_charges_name &&
+						s.range === rl_category &&
+						(!s.valid_from || frappe.datetime.str_to_obj(s.valid_from) <= today) &&
+						(!s.valid_till || frappe.datetime.str_to_obj(s.valid_till) >= today)
+				);
+
+				const charges_rate = pricing_row ? parseFloat(pricing_row.rate) || 0 : 0;
+				const preserved = preserved_data.get(description) || {};
+
+				row.weight = operation.cm_type === "Weight" ? category_weight : 0;
+				row.total_weight = row.weight;
+				row.total_area = operation.cm_type === "Area" ? category_area : 0;
+				row.charges_rate = preserved.charges_rate || charges_rate;
+				row.material_rate = preserved.material_rate || 0;
+				row.total_rate = preserved.total_rate || calculate_total_rate(row.charges_rate, row.material_rate);
+				row.total_cost =
+					operation.cm_type === "Weight" && row.total_weight > 0
+						? calculate_total_cost(row.total_weight, row.total_rate)
+						: operation.cm_type === "Area" && row.total_area > 0
+							? calculate_total_cost(row.total_area, row.total_rate)
+							: row.total_rate || 0;
+			}
+		} else {
+			const description = operation.cm_charges_name;
+			const row = frm.add_child("custom_costing_summary");
+			row.description = description;
+			row.row_type = "operation";
+
+			const pricing_row = summary.find(
+				s =>
+					s.type === "Operation Charges" &&
+					s.selected_item === operation.cm_charges_name &&
+					s.range === (total_weight > 3000 ? "Above 3 Mtrs" : "Till 3 Mtrs") &&
+					(!s.valid_from || frappe.datetime.str_to_obj(s.valid_from) <= today) &&
+					(!s.valid_till || frappe.datetime.str_to_obj(s.valid_till) >= today)
+			);
+
+			const charges_rate = pricing_row ? parseFloat(pricing_row.rate) || 0 : 0;
+			const preserved = preserved_data.get(description) || {};
+
+			row.weight = operation.cm_type === "Weight" ? total_weight : 0;
+			row.total_weight = row.weight;
+			row.total_area = operation.cm_type === "Area" ? total_area : 0;
+			row.charges_rate = preserved.charges_rate || charges_rate;
+			row.material_rate = preserved.material_rate || 0;
+			row.total_rate = preserved.total_rate || calculate_total_rate(row.charges_rate, row.material_rate);
+			row.total_cost =
+				operation.cm_type === "Weight" && row.total_weight > 0
+					? calculate_total_cost(row.total_weight, row.total_rate)
+					: operation.cm_type === "Area" && row.total_area > 0
+						? calculate_total_cost(row.total_area, row.total_rate)
+						: row.total_rate || 0;
+		}
+	}
+
+	// Add Hardware Cost row
+	const hardware_total = frm.doc.custom_hardware_summary?.find(row => row.hs_item_name === "Total");
+	const hardware_row = frm.add_child("custom_costing_summary");
+	hardware_row.description = "Hardware Cost";
+	hardware_row.row_type = "hardware";
+	const preserved_hardware = preserved_data.get("Hardware Cost") || {};
+	hardware_row.total_cost = hardware_total ? parseFloat(hardware_total.hs_total_cost) || 0 : 0;
+
+	hardware_row.total_rate = preserved_hardware.total_rate || 0;
+
+	// Add HC row
+	const hc_row = frm.add_child("custom_costing_summary");
+	hc_row.description = "H.C";
+	hc_row.row_type = "hc";
+	const preserved_hc = preserved_data.get("H.C") || {};
+	hc_row.wastage_percentage = preserved_hc.wastage_percentage || 10;
+	hc_row.total_cost = preserved_hc.total_cost || 0;
+	// HC cost will be recalculated in calculate_and_set_total_cost
+
+	// Add Sub Total row
+	const sub_total_row = frm.add_child("custom_costing_summary");
+	sub_total_row.description = "Sub Total";
+	sub_total_row.row_type = "sub_total";
+	const preserved_sub_total = preserved_data.get("Sub Total") || {};
+	sub_total_row.wastage_percentage = preserved_sub_total.wastage_percentage || 0;
+	sub_total_row.charges_rate = preserved_sub_total.charges_rate || 0;
+	sub_total_row.material_rate = preserved_sub_total.material_rate || 0;
+	sub_total_row.total_rate = preserved_sub_total.total_rate || 0;
+
+	const development_charges_row = frm.add_child("custom_costing_summary");
+	development_charges_row.description = "Development Cost";
+	development_charges_row.row_type = "development_cost";
+	const preserved_development_charges = preserved_data.get("Development Cost") || {};
+	development_charges_row.wastage_percentage = preserved_development_charges.wastage_percentage || 0;
+	development_charges_row.total_cost = preserved_development_charges.total_cost || 0;
+
+	// Add Additional Cost row
+	const additional_total = calculate_total_additional_cost(frm);
+	const additional_row = frm.add_child("custom_costing_summary");
+	additional_row.description = "Additional Cost";
+	additional_row.row_type = "additional";
+	const preserved_additional = preserved_data.get("Additional Cost") || {};
+	additional_row.total_cost = additional_total || 0;
+	additional_row.wastage_percentage = preserved_additional.wastage_percentage || 0;
+	additional_row.charges_rate = preserved_additional.charges_rate || 0;
+	additional_row.material_rate = preserved_additional.material_rate || 0;
+	additional_row.total_rate = preserved_additional.total_rate || 0;
+
+
+
+	// Add Final Cost row
+	const final_row = frm.add_child("custom_costing_summary");
+	final_row.description = "Final Cost";
+	final_row.row_type = "final";
+	const preserved_final = preserved_data.get("Final Cost") || {};
+	final_row.wastage_percentage = preserved_final.wastage_percentage || 0;
+	final_row.charges_rate = preserved_final.charges_rate || 0;
+	final_row.material_rate = preserved_final.material_rate || 0;
+	final_row.total_rate = preserved_final.total_rate || 0;
+
+	// Update operation rows incrementally to ensure weights/areas are correct
+	update_operation_rows(frm, rl_rt_summary, total_weight, total_area);
+
+	// Recalculate totals
+	calculate_and_set_total_cost(frm);
+
+	// Refresh the table
+	frm.refresh_field("custom_costing_summary");
 }
