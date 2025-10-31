@@ -1000,11 +1000,8 @@ async function populate_costing_summary(frm) {
 function update_costing_summary_row(frm, summary_item) {
 	const description = `${summary_item.ig} (${summary_item.rl} & ${summary_item.rt})`;
 	const row = frm.doc.custom_costing_summary.find((r) => r.description === description);
-	console.log(description, row);
 
 	if (!row) return;
-	console.log("updating row", row);
-
 
 	row.weight = summary_item.bw || 0;
 	row.wastage_weight = calculate_percent_value(row.wastage_percentage || 10, row.weight);
