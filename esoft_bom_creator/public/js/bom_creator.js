@@ -175,6 +175,7 @@ async function recalc_row(frm, cdt, cdn) {
 	};
 
 	update_summary_for_row(row_values, frm, cdt, cdn);
+
 	set_length_range(cdt, cdn);
 	frappe.model.set_value(cdt, cdn, "custom_blwt", blwt);
 	frappe.model.set_value(cdt, cdn, "custom_area_sqft", area);
@@ -248,6 +249,7 @@ async function handle_item_change(frm, cdt, cdn) {
 	// 	area: item.custom_area_sqft,
 	// };
 	update_full_summary(frm)
+	update_powder_coating_summary(frm)
 
 	// if (old_values.material) {
 	// 	const old_key = `${old_values.material}|${old_values.thickness}|${old_values.range}`;
@@ -331,7 +333,6 @@ function update_full_summary(frm) {
 	});
 	update_summary_table(frm);
 }
-
 async function set_operation_list(frm) {
 	if (!frm.operations_list) {
 		frm.operations_list = await frappe.db.get_list("Operation", {
@@ -368,7 +369,7 @@ function open_operation_dialog(frm, cdt, cdn) {
 		],
 		primary_action_label: __("Save"),
 		primary_action(values) {
-			handle_selected_operations(dialog, cdt, cdn);
+			handle_selected_operations(dialog, frm, cdt, cdn);
 			dialog.hide();
 		},
 	});
@@ -376,7 +377,7 @@ function open_operation_dialog(frm, cdt, cdn) {
 	dialog.show();
 }
 
-function handle_selected_operations(dialog, cdt, cdn) {
+function handle_selected_operations(dialog, frm, cdt, cdn) {
 	const row = locals[cdt][cdn];
 	const selected_rows = dialog.fields_dict.selected_operations.grid.get_selected_children();
 	const selected_ops = selected_rows
@@ -385,6 +386,7 @@ function handle_selected_operations(dialog, cdt, cdn) {
 		.join(", ");
 
 	frappe.model.set_value(cdt, cdn, "custom_msf", selected_ops);
+	update_powder_coating_summary(frm);
 }
 
 async function populate_operations_data(dialog, frm, cdt, cdn) {
@@ -437,14 +439,6 @@ function update_summary_for_row(row_values, frm, cdt, cdn) {
 	const row = locals[cdt][cdn];
 
 	const d_qty = (parseFloat(row.qty) || 0) - (row.custom_previous_qty || 0);
-	const new_area = parseFloat(row_values.new_area) || 0;
-	const old_area = parseFloat(row_values.area) || 0;
-	const old_range = row_values.range_length;
-	const new_range = row_values.new_range;
-	const selected_ops = (row.custom_msf || "")
-		.split(",")
-		.map(op => op.trim())
-		.filter(Boolean);
 
 	if (frm.hw_groups.includes(row.item_group)) {
 		adjust_hardware_row(frm, row, d_qty);
@@ -452,125 +446,72 @@ function update_summary_for_row(row_values, frm, cdt, cdn) {
 		recalc_hardware_totals(frm);
 	}
 
-	if (selected_ops.some(op => op.toLowerCase().includes("powder"))) {
-		let summary = frm.doc.custom_powder_coating_summary || [];
-
-		if (old_range === new_range || !old_range) {
-			const delta = new_area - old_area;
-
-			if (delta !== 0 || new_area > 0) {
-				const idx = summary.findIndex((r) => r.range === new_range);
-
-				if (idx === -1) {
-					if (new_area > 0) {
-
-						const current_length = summary.length;
-						frm.doc.custom_powder_coating_summary.pop();
-						const new_row = frm.add_child("custom_powder_coating_summary");
-						frappe.model.set_value(
-							new_row.doctype,
-							new_row.name,
-							"item_group",
-							"Powder Coating"
-						);
-						frappe.model.set_value(new_row.doctype, new_row.name, "range", new_range);
-						frappe.model.set_value(new_row.doctype, new_row.name, "area", new_area);
-						frm.refresh_field("custom_powder_coating_summary");
-						summary = frm.doc.custom_powder_coating_summary;
-
-						const total_row = frm.add_child("custom_powder_coating_summary");
-						frappe.model.set_value(
-							total_row.doctype,
-							total_row.name,
-							"item_group",
-							"Total"
-						);
-						frappe.model.set_value(total_row.doctype, total_row.name, "range", "");
-						frappe.model.set_value(total_row.doctype, total_row.name, "area", 0);
-						// If the previous last row was Total, swap to keep Total last
-						if (current_length > 0 && summary[current_length - 1].range === "Total") {
-							const temp = summary[current_length];
-							summary[current_length] = summary[current_length - 1];
-							summary[current_length - 1] = temp;
-							frm.refresh_field("custom_powder_coating_summary");
-						}
-					}
-				} else {
-					const srow = summary[idx];
-
-					const updated_area = (parseFloat(srow.area) || 0) + delta;
-					if (updated_area <= 0) {
-						// Remove row
-						frm.doc.custom_powder_coating_summary.splice(idx, 1);
-						frm.refresh_field("custom_powder_coating_summary");
-					} else {
-						frappe.model.set_value(srow.doctype, srow.name, "area", updated_area);
-					}
-				}
-			}
-		} else {
-			if (old_area > 0 && old_range) {
-				const old_idx = summary.findIndex((r) => r.range === old_range);
-
-				if (old_idx !== -1) {
-					const srow = summary[old_idx];
-					const updated_area = (parseFloat(srow.area) || 0) - old_area;
-					if (updated_area <= 0) {
-						frm.doc.custom_powder_coating_summary.splice(old_idx, 1);
-						frm.refresh_field("custom_powder_coating_summary");
-					} else {
-						frappe.model.set_value(srow.doctype, srow.name, "area", updated_area);
-					}
-				}
-			}
-
-			// Add to new range
-			if (new_area > 0 && new_range) {
-				const idx = summary.findIndex((r) => r.range === new_range);
-				if (idx === -1) {
-					// Add new row
-					frm.doc.custom_powder_coating_summary.pop();
-					const new_row = frm.add_child("custom_powder_coating_summary");
-					frappe.model.set_value(
-						new_row.doctype,
-						new_row.name,
-						"item_group",
-						"Powder Coating"
-					);
-					frappe.model.set_value(new_row.doctype, new_row.name, "range", new_range);
-					frappe.model.set_value(new_row.doctype, new_row.name, "area", new_area);
-					frm.refresh_field("custom_powder_coating_summary");
-					summary = frm.doc.custom_powder_coating_summary;
-
-					// Re-add Total row
-					const total_row = frm.add_child("custom_powder_coating_summary");
-					frappe.model.set_value(
-						total_row.doctype,
-						total_row.name,
-						"item_group",
-						"Total"
-					);
-					frappe.model.set_value(total_row.doctype, total_row.name, "range", "");
-					frappe.model.set_value(total_row.doctype, total_row.name, "area", 0);
-				} else {
-					const srow = summary[idx];
-
-					const updated_area = (parseFloat(srow.area) || 0) + new_area;
-					if (updated_area <= 0) {
-						frm.doc.custom_powder_coating_summary.splice(idx, 1);
-						frm.refresh_field("custom_powder_coating_summary");
-					} else {
-						frappe.model.set_value(srow.doctype, srow.name, "area", updated_area);
-					}
-				}
-			}
-		}
-		recalc_powder_totals(frm);
-	}
-
 	refresh_summary_tables(frm);
 }
 
+function update_powder_coating_summary(frm) {
+	const has_powder = (frm.doc.items || []).some(item => {
+		const ops = item.custom_msf || "";
+		return ops.toLowerCase().split(",").some(op => op.trim().includes("powder"));
+	});
+
+	if (!has_powder) {
+		frm.clear_table("custom_powder_coating_summary");
+		frm.refresh_field("custom_powder_coating_summary");
+		return;
+	}
+
+	const area_map = {};
+
+	(frm.doc.items || []).forEach(item => {
+		const range = item.custom_range;
+		const area = flt(item.custom_area_sqft) || 0;
+		const ops = (item.custom_msf || "").toLowerCase();
+
+		if (!range || area <= 0) return;
+
+		const is_powder = ops.split(",").some(op => op.trim().includes("powder"));
+
+		if (is_powder) {
+			area_map[range] = (area_map[range] || 0) + area;
+		}
+	});
+
+	const summary = [];
+	let has_entry = false;
+
+	Object.keys(area_map).sort().forEach(range => {
+		const area = area_map[range];
+		if (area > 0) {
+			summary.push({
+				item_group: "Powder Coating",
+				range: range,
+				area: area
+			});
+			has_entry = true;
+		}
+	});
+
+	if (has_entry) {
+		summary.push({
+			item_group: "Total",
+			range: "",
+			area: 0
+		});
+	}
+
+	// Replace table
+	frm.clear_table("custom_powder_coating_summary");
+	summary.forEach(row => {
+		const child = frm.add_child("custom_powder_coating_summary");
+		Object.keys(row).forEach(f => {
+			frappe.model.set_value(child.doctype, child.name, f, row[f]);
+		});
+	});
+
+	frm.refresh_field("custom_powder_coating_summary");
+	recalc_powder_totals(frm);
+}
 function aggregate_items(items = [], hw_groups, powder_groups) {
 	const hardware_agg = {};
 	const powder_agg = {};
@@ -612,12 +553,36 @@ function rebuild_hardware_summary(frm, hardware_agg, cust_price, today) {
 	let total_amt = 0;
 
 	Object.values(hardware_agg).forEach((o) => {
-		const price_row = (cust_price.items || []).find(
-			(it) =>
-				it.item === o.item_code &&
-				(!it.valid_from || it.valid_from <= today) &&
-				(!it.valid_till || it.valid_till >= today)
-		);
+		const price_row = (cust_price.items || []).find((it) => {
+			if (it.item !== o.item_code) return false;
+
+			let validFrom = it.valid_from ? it.valid_from : null;
+			let validTill = it.valid_till ? it.valid_till : null;
+
+			if (validTill && validTill < today) {
+
+				frappe.msgprint({
+					title: "Expired Price",
+					message: `⚠️ Price for ${it.item} expired on ${it.valid_till}`,
+					indicator: "orange",
+				});
+				return false;
+			}
+
+			if (validFrom && validFrom > today) {
+				frappe.msgprint({
+					title: "Future Price",
+					message: `⚠️ Price for ${it.item} is not valid until ${it.valid_from}`,
+					indicator: "orange",
+				});
+				return false;
+			}
+
+			return (
+				(!it.valid_from || validFrom <= today) &&
+				(!it.valid_till || validTill >= today)
+			);
+		});
 
 		const unit_price = price_row ? price_row.rate : 0;
 		const total_cost = o.qty * unit_price;
@@ -638,6 +603,8 @@ function rebuild_hardware_summary(frm, hardware_agg, cust_price, today) {
 	tot.hs_unit_price = null;
 	tot.hs_total_cost = total_amt;
 }
+
+
 
 function rebuild_powder_summary(frm, powder_agg) {
 	frm.clear_table("custom_powder_coating_summary");
@@ -1070,35 +1037,6 @@ async function update_costing_operation_rows(frm) {
 	frm.refresh_field("custom_costing_summary");
 }
 
-// function calculate_and_set_total_cost(frm) {
-// 	const rows = frm.doc.custom_costing_summary || [];
-// 	if (rows.length >= 3) {
-// 		const sum_rows = rows.slice(0, -3);
-// 		const sub_total = sum_rows.reduce(
-// 			(sum, item) => sum + (parseFloat(item.total_cost) || 0),
-// 			0
-// 		);
-
-// 		const sub_total_row = rows[rows.length - 3];
-// 		sub_total_row.total_cost = sub_total;
-
-// 		const development_charges = parseFloat(rows[rows.length - 2].total_cost) || 0;
-
-// 		const total_cost = sub_total + development_charges;
-
-// 		const total_row = rows[rows.length - 1];
-// 		total_row.total_cost = total_cost;
-
-// 		const additional_costs = frm.doc.custom_additional_costs || [];
-// 		const total_additional_cost = additional_costs.reduce(
-// 			(sum, item) => sum + (parseFloat(item.amount) || 0),
-// 			0
-// 		);
-// 		frm.doc.raw_material_cost = total_cost + total_additional_cost;
-// 		frm.refresh_field("raw_material_cost");
-// 		frm.refresh_field("custom_costing_summary");
-// 	}
-// }
 function calculate_summary_sub_total(rows) {
 	const sum_rows = rows.slice(0, -4);
 
@@ -1224,19 +1162,32 @@ function set_total_wastage(frm, cdt, cdn) {
 		calculate_total_wastage(row.weight, row.wastage_weight)
 	);
 }
-
 function get_material_rate(summary, today, name, range_length) {
-
 	return (
 		summary
-			.filter(
-				(row) =>
-					row.type === "Operation Charges" &&
-					row.selected_item === name &&
-					row.range === range_length &&
-					(!row.valid_from || frappe.datetime.str_to_obj(row.valid_from) <= today) &&
-					(!row.valid_till || frappe.datetime.str_to_obj(row.valid_till) >= today)
-			)
+			.filter((row) => {
+				if (row.type !== "Operation Charges" || row.selected_item !== name || row.range !== range_length)
+					return false;
+
+				let validFrom = row.valid_from ? frappe.datetime.str_to_obj(row.valid_from) : null;
+				let validTill = row.valid_till ? frappe.datetime.str_to_obj(row.valid_till) : null;
+
+				if (validTill && validTill < today) {
+					frappe.msgprint(`⚠️ Rate for ${row.selected_item} (range ${row.range}) expired on ${row.valid_till}`, {
+						indicator: "orange",
+					});
+					return false;
+				}
+
+				if (validFrom && validFrom > today) {
+					frappe.msgprint(`⚠️ Rate for ${row.selected_item} (range ${row.range}) not valid until ${row.valid_from}`, {
+						indicator: "orange",
+					});
+					return false;
+				}
+
+				return true;
+			})
 			.sort((a, b) => {
 				const a_from = a.valid_from ? frappe.datetime.str_to_obj(a.valid_from) : 0;
 				const b_from = b.valid_from ? frappe.datetime.str_to_obj(b.valid_from) : 0;
@@ -1246,17 +1197,33 @@ function get_material_rate(summary, today, name, range_length) {
 	);
 }
 
+
 function get_charges_rate(summary, row_type, today, item_group, range_val) {
 	return (
 		summary
-			.filter(
-				(row) =>
-					row.type === row_type &&
-					row.selected_item === item_group &&
-					row.range === range_val &&
-					(!row.valid_from || frappe.datetime.str_to_obj(row.valid_from) <= today) &&
-					(!row.valid_till || frappe.datetime.str_to_obj(row.valid_till) >= today)
-			)
+			.filter((row) => {
+				if (row.type !== row_type || row.selected_item !== item_group || row.range !== range_val)
+					return false;
+
+				let validFrom = row.valid_from ? frappe.datetime.str_to_obj(row.valid_from) : null;
+				let validTill = row.valid_till ? frappe.datetime.str_to_obj(row.valid_till) : null;
+
+				if (validTill && validTill < today) {
+					frappe.msgprint(`⚠️ ${row.type} rate for ${row.selected_item} (range ${row.range}) expired on ${row.valid_till}`, {
+						indicator: "orange",
+					});
+					return false;
+				}
+
+				if (validFrom && validFrom > today) {
+					frappe.msgprint(`⚠️ ${row.type} rate for ${row.selected_item} (range ${row.range}) not valid until ${row.valid_from}`, {
+						indicator: "orange",
+					});
+					return false;
+				}
+
+				return true;
+			})
 			.sort((a, b) => {
 				const b_from = b.valid_from ? frappe.datetime.str_to_obj(b.valid_from) : 0;
 				const a_from = a.valid_from ? frappe.datetime.str_to_obj(a.valid_from) : 0;
